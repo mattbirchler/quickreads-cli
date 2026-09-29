@@ -357,8 +357,8 @@ const READER_HINTS: Hints = {
 
 // While a passage is being chosen. Saving and leaving outlast everything else.
 const MARKING_HINTS: Hints = {
-  hints: [['↑↓', 'sentence'], ['←→', 'end by a word'], ['J K', 'more, fewer sentences'], ['H L', 'start by a word']],
-  pinned: [['n', 'add a note'], ['↵', 'highlight'], ['esc', 'cancel']],
+  hints: [['↑↓', 'sentence'], ['←→', 'word'], ['J K', 'longer, shorter'], ['H L', 'start']],
+  pinned: [['n', 'note'], ['↵', 'highlight'], ['esc', 'cancel']],
 };
 
 const HIGHLIGHTS_HINTS: Hints = {
@@ -379,7 +379,7 @@ function readerFrame(state: State, reader: ReaderView, cols: number, rows: numbe
   if (reader.loading) right = loadingSegs(state);
   else if (reader.marking !== null) {
     const words = wordsOf(selectedText(reader.prose, reader.marking)).length;
-    right = [seg(`Choosing a highlight · ${count(words, 'word')} `, accent)];
+    right = [seg(`Highlighting · ${count(words, 'word')} `, accent)];
   } else if (reader.error === null && total > height) {
     // How much has been seen, which is the bottom of the screen, not the top.
     const fraction = Math.min(1, (reader.scroll + height) / total);

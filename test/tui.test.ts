@@ -822,8 +822,8 @@ test('m chooses the first sentence on screen and says what the keys do', async (
   assert.equal(chosen(r), 'First sentence of the piece.');
   // Without color, brackets are what shows it.
   assert.ok(frame.some((l) => l.includes('[First sentence of the piece.] Second sentence')));
-  assert.match(frame[0]!, /Choosing a highlight · 5 words $/);
-  assert.match(frame[23]!, /^ ↑↓ sentence {3}←→ end by a word .* n add a note {3}↵ highlight {3}esc cancel$/);
+  assert.match(frame[0]!, /Highlighting · 5 words $/);
+  assert.equal(frame[23], ' ↑↓ sentence   ←→ word   J K longer, shorter   H L start   n note   ↵ highlight   esc cancel');
 });
 
 test('the passage moves by the sentence, and crosses code to the next paragraph', async (t) => {
