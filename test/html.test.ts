@@ -17,7 +17,7 @@ test('headings keep their level', () => {
   assert.deepEqual(doc.blocks.map((b) => [b.kind, b.level]), [['heading', 2], ['text', 0], ['heading', 4]]);
 });
 
-test('inline styles ride on spans and neighbours merge', () => {
+test('inline styles ride on spans and neighbors merge', () => {
   const [block] = parseHtml('<p>Plain <strong>bold <em>both</em></strong> <code>x = 1</code></p>').blocks;
   assert.deepEqual(block!.spans, [
     { text: 'Plain ' },

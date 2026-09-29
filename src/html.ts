@@ -121,7 +121,7 @@ const sameStyle = (a: Style, b: Style): boolean =>
 /**
  * One block's spans, tidied: whitespace collapsed to single spaces (across
  * span boundaries too), none at the edges of the block or around a hard
- * break, neighbours of the same style merged.
+ * break, neighbors of the same style merged.
  */
 export function tidySpans(spans: Span[]): Span[] {
   const out: Span[] = [];

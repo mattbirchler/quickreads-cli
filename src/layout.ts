@@ -236,7 +236,7 @@ function layoutBlock(
       const runs = line === '' ? [[]] : splitWord([{ text: line, style: {} }], codeWidth);
       for (const run of runs) code.push(run.map((p) => p.text).join(''));
     }
-    // A panel behind the code where the terminal's colour is known. The
+    // A panel behind the code where the terminal's color is known. The
     // panel is as wide as its longest line, with a line of padding above and
     // below; without it the indent and the quieter ink do the job.
     if (!canTint()) return code.map((text) => `${lead}  ${ink2(text)}`.trimEnd());
@@ -339,7 +339,7 @@ export function articleHeader(article: Article, width: number, showUrl = true): 
     length === '' ? '' : `${length} read`,
   ].filter((s) => s !== '').join(' · ');
   for (const line of wrapText(meta, width)) out.push(ink3(line));
-  // Tags in their own colours, as many as fit on one line.
+  // Tags in their own colors, as many as fit on one line.
   let tags = '';
   let used = 0;
   for (const tag of article.tags ?? []) {

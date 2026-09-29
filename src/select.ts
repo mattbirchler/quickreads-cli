@@ -12,7 +12,7 @@ export interface Selection extends Range {
   block: number;
 }
 
-// Words that end in a full stop without ending the sentence.
+// Words that end in a period without ending the sentence.
 const ABBREVIATIONS = new Set([
   'mr', 'mrs', 'ms', 'dr', 'prof', 'st', 'jr', 'sr', 'vs', 'etc', 'fig', 'e.g', 'i.e', 'cf', 'approx',
 ]);

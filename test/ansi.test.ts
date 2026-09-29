@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { accent, canTint, hyperlink, isDark, selected, setBackground, stripAnsi, surface, tagInk } from '../src/ansi.ts';
 
-// Colour only happens at a terminal, so these tests stand one up: a TTY
-// stdout that speaks truecolor, put back the way it was afterwards.
+// Color only happens at a terminal, so these tests stand one up: a TTY
+// stdout that speaks truecolor, put back the way it was afterward.
 function atTerminal<T>(env: Record<string, string | undefined>, fn: () => T): T {
   const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
   const saved: Record<string, string | undefined> = {};
@@ -83,7 +83,7 @@ test('the accent is heavier on a light background', () => {
   });
 });
 
-test('tags wear their own colour, and an unknown one goes quiet', () => {
+test('tags wear their own color, and an unknown one goes quiet', () => {
   atTerminal({}, () => {
     assert.ok(tagInk('blue', '#Tech').includes('38;2;96;165;250'));
     assert.ok(tagInk('chartreuse', '#Odd').includes('38;2;159;162;171'));

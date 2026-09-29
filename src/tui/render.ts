@@ -2,10 +2,10 @@
 // without a terminal. Every frame is exactly `rows` lines tall and no line is
 // wider than `cols`.
 //
-// Nothing here depends on colour to be understood. The selected row has a
+// Nothing here depends on color to be understood. The selected row has a
 // bar in its gutter as well as a wash behind it, the current tab has brackets
 // when it cannot have weight, and a progress bar is drawn in two different
-// characters. Colour is the finish, not the structure.
+// characters. Color is the finish, not the structure.
 import type { Article, Highlight } from '../types.ts';
 import {
   accent, bold, canTint, err, ink2, ink3, italic, ok, selected, stringWidth, surface, tagInk, truncate,
@@ -512,7 +512,7 @@ function helpFrame(cols: number, rows: number): string[] {
 
   // Two columns where there is room for them, one where there is not.
   // Section titles go when that is what it takes to get every key on screen,
-  // and unevenly filled sections stop being padded to match their neighbour.
+  // and unevenly filled sections stop being padded to match their neighbor.
   const two = cols >= HELP_COLUMN * 2 + 10;
   const half = Math.ceil(HELP.length / 2);
   const depths = HELP.slice(0, half).map((s, i) => Math.max(s.keys.length, HELP[half + i]?.keys.length ?? 0));
@@ -559,7 +559,7 @@ function helpFrame(cols: number, rows: number): string[] {
   }
   frame.push(row(blank), `${margin}${ink3(`╰${'─'.repeat(inner)}╯`)}`);
 
-  // Centred in the height that is left, when there is any to spare.
+  // Centered in the height that is left, when there is any to spare.
   const spare = height - (frame.length - 2);
   if (spare > 1) frame.splice(2, 0, ...Array<string>(Math.floor(spare / 2)).fill(''));
   return frame;

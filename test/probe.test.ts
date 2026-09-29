@@ -4,18 +4,18 @@ import { readProbe, backgroundFromEnv } from '../src/tui/probe.ts';
 
 const ATTRS = '\x1b[?62;4c';
 
-test('a colour reply is read at whatever width the terminal sends', () => {
+test('a color reply is read at whatever width the terminal sends', () => {
   assert.deepEqual(readProbe(`\x1b]11;rgb:1e1e/1e1e/2e2e\x07${ATTRS}`).rgb, [30, 30, 46]);
   assert.deepEqual(readProbe(`\x1b]11;rgb:ff/ff/ff\x1b\\${ATTRS}`).rgb, [255, 255, 255]);
   assert.deepEqual(readProbe(`\x1b]11;rgb:f/0/8\x07${ATTRS}`).rgb, [255, 0, 136]);
   assert.deepEqual(readProbe(`\x1b]11;rgba:0000/0000/0000/ffff\x07${ATTRS}`).rgb, [0, 0, 0]);
 });
 
-test('attributes without a colour means the terminal cannot say, and the wait is over', () => {
+test('attributes without a color means the terminal cannot say, and the wait is over', () => {
   assert.deepEqual(readProbe(ATTRS), { rgb: null, done: true, rest: '' });
 });
 
-test('a colour with no attributes yet is still waiting', () => {
+test('a color with no attributes yet is still waiting', () => {
   const probe = readProbe('\x1b]11;rgb:0000/0000/0000\x07');
   assert.deepEqual(probe.rgb, [0, 0, 0]);
   assert.equal(probe.done, false);

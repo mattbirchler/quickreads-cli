@@ -1,4 +1,4 @@
-// Asking the terminal what colour is behind the text. The answer lets the
+// Asking the terminal what color is behind the text. The answer lets the
 // selection be a tint of the reader's own background instead of a slab of
 // reverse video, and picks inks that read on a light theme.
 import type { Rgb } from '../ansi.ts';
@@ -6,7 +6,7 @@ import type { Rgb } from '../ansi.ts';
 // OSC 11 asks for the background. The device attributes request after it is
 // the trick that makes this safe to ask of any terminal: every terminal
 // answers that one, and answers in order, so its reply arriving first means
-// the colour question was not understood and there is nothing to wait for.
+// the color question was not understood and there is nothing to wait for.
 export const QUERY = '\x1b]11;?\x07\x1b[c';
 
 // eslint-disable-next-line no-control-regex
@@ -21,7 +21,7 @@ const channel = (hex: string): number =>
 export interface Probe {
   // The background, once the terminal has said.
   rgb: Rgb | null;
-  // True once the terminal has finished answering, with or without a colour.
+  // True once the terminal has finished answering, with or without a color.
   done: boolean;
   // Whatever else arrived: keys typed before the first frame, to be handled
   // as input rather than dropped.
@@ -63,7 +63,7 @@ export function backgroundFromEnv(env: NodeJS.ProcessEnv): Rgb | null {
 const TIMEOUT_MS = 250;
 
 /**
- * Ask the terminal for its background. Resolves with the colour (or null) and
+ * Ask the terminal for its background. Resolves with the color (or null) and
  * any keys that were typed while waiting. stdin must already be in raw mode.
  */
 export function probeBackground(

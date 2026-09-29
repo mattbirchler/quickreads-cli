@@ -21,7 +21,7 @@ export function page(text: string): Promise<void> {
     };
     // PAGER is a command line ("less -S"), so it goes through the shell the
     // way git and man run it. -F quits at once when the article fits on one
-    // screen, -R passes colour through, -X leaves the text on screen after.
+    // screen, -R passes color through, -X leaves the text on screen after.
     const child = spawn(pager, {
       shell: true,
       stdio: ['pipe', 'inherit', 'inherit'],

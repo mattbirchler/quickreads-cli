@@ -88,15 +88,15 @@ An article you started elsewhere opens where you stopped. `g` goes back to the
 top. In a terminal that supports it, links in the article open when you click
 them.
 
-### Colours
+### Colors
 
-`quickreads` asks your terminal for its background colour when it starts, and
+`quickreads` asks your terminal for its background color when it starts, and
 picks inks that read well on it. The selected row gets a purple tint mixed from
 that background. A terminal that does not answer within a quarter of a second
 gets the dark inks and a selection in reverse video.
 
 Set `QUICKREADS_THEME` to `dark` or `light` to skip the question. Set
-`NO_COLOR` to turn colour off. Nothing on screen depends on colour alone. A bar
+`NO_COLOR` to turn color off. Nothing on screen depends on color alone. A bar
 at the left edge marks the selected row, and the current list is in brackets.
 
 ![The queue on a white terminal background, with darker inks and a pale purple selection](docs/screenshots/queue-light.png)
@@ -163,8 +163,8 @@ quickreads list --plain | cut -f5 | head -5
 quickreads highlights --limit 500 --plain | cut -f3 > highlights.txt
 ```
 
-Hints and colour appear only when the output is a terminal. In a pipe, an empty
-result prints nothing with `--json` or `--plain`. `NO_COLOR` turns colour off
+Hints and color appear only when the output is a terminal. In a pipe, an empty
+result prints nothing with `--json` or `--plain`. `NO_COLOR` turns color off
 everywhere.
 
 A command that waits on the server for more than 150 milliseconds shows a

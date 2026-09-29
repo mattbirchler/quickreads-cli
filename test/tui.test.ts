@@ -89,7 +89,7 @@ test('it opens on the queue, first article selected', async (t) => {
   assert.equal(frame.length, 24);
   assert.match(frame[0]!, /^ Quick Reads {3}\[Queue\] To Do {2}Archive +3 articles $/);
   assert.match(frame[2]!, /^ {3}Today ─+ {2}$/);
-  // The selected row has a bar in its gutter, so it shows without colour.
+  // The selected row has a bar in its gutter, so it shows without color.
   assert.match(frame[3]!, /^ ▍ Article 1 +1h {2}$/);
   assert.match(frame[4]!, /^ {3}Example · 2 min +$/);
   assert.match(frame[5]!, /^ {3}Article 2 +2h {2}$/);
@@ -201,7 +201,7 @@ test('the reader scrolls by line and by page, and says how far along it is', asy
   assert.equal(r.app.state.reader!.scroll, r.app.state.reader!.lines.length - 21, 'it does not scroll past the end');
 });
 
-test('the article is centred in a wide terminal and rewraps on resize', async (t) => {
+test('the article is centered in a wide terminal and rewraps on resize', async (t) => {
   const client = library();
   client.account.articles[0]!.content = `<p>${'word '.repeat(200)}</p>`;
   const r = await rig(client, { cols: 120, rows: 30 });
@@ -366,7 +366,7 @@ test('archiving a search result marks it rather than removing it', async (t) => 
   assert.ok(!frame[3]!.includes('archived'));
 });
 
-test('a search with no matches says so; an empty search is cancelled', async (t) => {
+test('a search with no matches says so; an empty search is canceled', async (t) => {
   const r = await rig();
   t.after(() => r.app.stop());
   let frame = await r.press(`/zzzz${ENTER}`);
@@ -668,7 +668,7 @@ test('an article opens where the reading stopped', async (t) => {
 
   frame = await r.press('g');
   assert.ok(frame.some((l) => l.includes('Paragraph 0.')));
-  // Resizing afterwards keeps the place it is at, not the place it resumed.
+  // Resizing afterward keeps the place it is at, not the place it resumed.
   r.size.cols = 60;
   r.app.resize();
   assert.equal(r.app.state.reader!.scroll, 0);
@@ -820,7 +820,7 @@ test('m chooses the first sentence on screen and says what the keys do', async (
   const frame = await r.press(`m`);
   // Headings are passed over: a highlight is made in the prose.
   assert.equal(chosen(r), 'First sentence of the piece.');
-  // Without colour, brackets are what shows it.
+  // Without color, brackets are what shows it.
   assert.ok(frame.some((l) => l.includes('[First sentence of the piece.] Second sentence')));
   assert.match(frame[0]!, /Choosing a highlight · 5 words $/);
   assert.match(frame[23]!, /^ ↑↓ sentence {3}←→ end by a word .* n add a note {3}↵ highlight {3}esc cancel$/);

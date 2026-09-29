@@ -7,7 +7,7 @@ import {
 
 const texts = (text: string): string[] => sentencesOf(text).map((r) => text.slice(r.from, r.to));
 
-test('a paragraph splits at full stops, questions and exclamations', () => {
+test('a paragraph splits at periods, questions and exclamations', () => {
   assert.deepEqual(texts('It works. Does it? It does! Good.'), ['It works.', 'Does it?', 'It does!', 'Good.']);
 });
 
@@ -28,7 +28,7 @@ test('an ellipsis ends a sentence only when a new one follows', () => {
 });
 
 test('text with no punctuation is one sentence, and empty text is none', () => {
-  assert.deepEqual(texts('  A heading with no full stop  '), ['A heading with no full stop']);
+  assert.deepEqual(texts('  A heading with no period  '), ['A heading with no period']);
   assert.deepEqual(texts(''), []);
   assert.deepEqual(texts('   '), []);
 });
