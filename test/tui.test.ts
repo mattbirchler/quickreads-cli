@@ -2,8 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env['NO_COLOR'] = '1';
+// Rows are filed under Today and Yesterday by the local calendar, so the
+// tests pin which calendar that is.
+process.env['TZ'] = 'UTC';
 
 import { createApp, type App, type Terminal } from '../src/tui/app.ts';
+import { progressBar } from '../src/tui/render.ts';
 import { ApiError } from '../src/api.ts';
 import { stringWidth } from '../src/ansi.ts';
 import { article, highlight, fakeClient, NOW, type FakeClient } from './helpers/fakes.ts';
@@ -82,10 +86,14 @@ test('it opens on the queue, first article selected', async (t) => {
   t.after(() => r.app.stop());
   const frame = r.app.frame();
   assert.equal(frame.length, 24);
-  assert.match(frame[0]!, /^ Quick Reads {2}\[Queue\] {2}To Do {2}Archive +3 articles $/);
-  assert.match(frame[2]!, /^ {2}Article 1 +Example · 2 min · 1h {2}$/);
+  assert.match(frame[0]!, /^ Quick Reads {3}\[Queue\] To Do {2}Archive +3 articles $/);
+  assert.match(frame[2]!, /^ {3}Today ─+ {2}$/);
+  // The selected row has a bar in its gutter, so it shows without colour.
+  assert.match(frame[3]!, /^ ▍ Article 1 +1h {2}$/);
+  assert.match(frame[4]!, /^ {3}Example · 2 min +$/);
+  assert.match(frame[5]!, /^ {3}Article 2 +2h {2}$/);
   assert.equal(r.app.state.list.selected, 0);
-  assert.match(frame[23]!, /↵ read · a archive/);
+  assert.match(frame[23]!, /↵ read {3}a archive/);
 });
 
 test('every frame fits the terminal exactly, at any size', async (t) => {
@@ -144,7 +152,7 @@ test('Enter opens the article; Esc comes back to the same row', async (t) => {
   t.after(() => r.app.stop());
   const frame = await r.press(`${DOWN}${ENTER}`);
   assert.equal(r.app.state.screen, 'reader');
-  assert.match(frame[0]!, /^ Quick Reads {2}Article 2/);
+  assert.match(frame[0]!, /^ Quick Reads {3}Article 2/);
   assert.ok(frame.some((l) => l.trim() === 'Body of article 2.'));
   assert.match(frame[23]!, /esc back/);
   // Bodies are fetched on open, never with the list.
@@ -284,13 +292,15 @@ test('tab cycles Queue, To Do, Archive; numbers jump straight there', async (t) 
   const r = await rig();
   t.after(() => r.app.stop());
   let frame = await r.press(TAB);
-  assert.match(frame[0]!, /Queue {2}\[To Do\] {2}Archive +1 item $/);
-  assert.match(frame[2]!, /Try this app +Example · link/);
+  assert.match(frame[0]!, / Queue \[To Do\] Archive +1 item $/);
+  // To Do rows carry the circle that a ticks off.
+  assert.match(frame[3]!, /^ ▍ ○ Try this app/);
+  assert.match(frame[4]!, /Example · link/);
   assert.match(frame[23]!, /a done/);
 
   frame = await r.press(TAB);
   assert.match(frame[0]!, /\[Archive\] +1 article $/);
-  assert.match(frame[2]!, /Old news/);
+  assert.match(frame[3]!, /Old news/);
   assert.match(frame[23]!, /a unarchive/);
 
   frame = await r.press(TAB);
@@ -327,12 +337,14 @@ test('/ searches, shows what is archived, and Esc returns to the list it left', 
   t.after(() => r.app.stop());
   await r.press('3');
   let frame = await r.press('/');
-  assert.match(frame[23]!, /^ Search: /);
+  assert.match(frame[23]!, /^ › Search /);
   frame = await r.press('news');
-  assert.match(frame[23]!, /^ Search: news/);
+  assert.match(frame[23]!, /^ › Search news/);
   frame = await r.press(ENTER);
-  assert.match(frame[0]!, /^ Quick Reads {2}Search: news +1 match $/);
-  assert.match(frame[2]!, /Old news +archived · Example/);
+  assert.match(frame[0]!, /^ Quick Reads {3}Search {2}news +1 match $/);
+  // Results are ranked rather than dated, so there are no day headings.
+  assert.match(frame[2]!, /^ ▍ Old news/);
+  assert.match(frame[3]!, /Example · archived · 2 min/);
   assert.match(frame[23]!, /esc back/);
 
   frame = await r.press(ESC);
@@ -344,12 +356,13 @@ test('archiving a search result marks it rather than removing it', async (t) => 
   const r = await rig();
   t.after(() => r.app.stop());
   let frame = await r.press(`/Article 2${ENTER}`);
-  assert.match(frame[2]!, /Article 2 +Example/);
+  assert.match(frame[2]!, /Article 2/);
+  assert.match(frame[3]!, /Example · 2 min/);
   frame = await r.press('a');
   assert.equal(r.app.state.list.items.length, 1);
-  assert.match(frame[2]!, /Article 2 +archived · Example/);
+  assert.match(frame[3]!, /Example · archived · 2 min/);
   frame = await r.press('a');
-  assert.ok(!frame[2]!.includes('archived'));
+  assert.ok(!frame[3]!.includes('archived'));
 });
 
 test('a search with no matches says so; an empty search is cancelled', async (t) => {
@@ -397,11 +410,11 @@ test('s saves a pasted link to the top of the queue', async (t) => {
   t.after(() => r.app.stop());
   await r.press(DOWN);
   let frame = await r.press('s');
-  assert.match(frame[23]!, /^ Save link: /);
+  assert.match(frame[23]!, /^ › Save link /);
   frame = await r.press(`example.org/new${ENTER}`);
   assert.ok(r.client.calls.includes('save {"url":"https://example.org/new"}'));
-  assert.match(frame[23]!, /Saved to your queue: A Saved Page\./);
-  assert.match(frame[2]!, /A Saved Page/);
+  assert.match(frame[23]!, /^ ✓ Saved to your queue: A Saved Page\./);
+  assert.match(frame[3]!, /A Saved Page/);
   // The row that was selected still is.
   assert.equal(r.app.state.list.items[r.app.state.list.selected]!.id, 'a2');
 });
@@ -432,15 +445,15 @@ test('h lists highlights; Enter opens the article at that passage', async (t) =>
   const r = await rig(client);
   t.after(() => r.app.stop());
   let frame = await r.press('h');
-  assert.match(frame[0]!, /^ Quick Reads {2}Highlights +2 highlights $/);
-  assert.deepEqual(frame.slice(2, 8), [
-    ' ▸ Article 1 · Example · 2h',
+  assert.match(frame[0]!, /^ Quick Reads {3}Highlights +2 highlights $/);
+  assert.match(frame[2]!, /^ ▍ Article 1 +Example · 2h {2}$/);
+  assert.deepEqual([3, 4, 6, 7].map((i) => frame[i]!.trimEnd()), [
     '   ▎ Body of article 1.',
     '',
-    '   Article 2 · Example · 2h',
     '   ▎ article 2',
     '     Note: Worth remembering.',
   ]);
+  assert.match(frame[5]!, /^ {3}Article 2 +Example · 2h {2}$/);
 
   frame = await r.press(`${DOWN}${ENTER}`);
   assert.equal(r.app.state.screen, 'reader');
@@ -478,7 +491,7 @@ test('r refreshes in place and keeps the selection on its article', async (t) =>
   await r.press(DOWN);
   r.client.account.articles.unshift(article('new', { title: 'Just saved', savedAt: ago(60_000) }));
   const frame = await r.press('r');
-  assert.match(frame[2]!, /Just saved/);
+  assert.match(frame[3]!, /Just saved/);
   assert.equal(r.app.state.list.items[r.app.state.list.selected]!.id, 'a2');
 });
 
@@ -491,7 +504,7 @@ test('a queue that fails to load says why and r tries again', async (t) => {
   assert.ok(frame.some((l) => l.includes('Could not reach https://quickreads.test.')));
   assert.ok(frame.some((l) => l.includes('Press r to try again.')));
   frame = await r.press('r');
-  assert.match(frame[2]!, /Article 1/);
+  assert.match(frame[3]!, /Article 1/);
 });
 
 test('a rejected key says how to fix it', async (t) => {
@@ -514,6 +527,197 @@ test('an answer that arrives after the reader moved on is dropped', async (t) =>
   assert.deepEqual(r.app.state.list.items.map((a) => a.id), ['old']);
 });
 
+test('rows are filed under the day they were saved', async (t) => {
+  const client = fakeClient({
+    articles: [
+      article('n1', { title: 'This morning', savedAt: ago(2 * HOUR) }),
+      article('n2', { title: 'Last night', savedAt: ago(14 * HOUR) }),
+      article('n3', { title: 'Midweek', savedAt: ago(3 * 24 * HOUR) }),
+      article('n4', { title: 'A while back', savedAt: ago(20 * 24 * HOUR) }),
+      article('n5', { title: 'In the summer', savedAt: '2026-07-04T12:00:00.000Z' }),
+      article('n6', { title: 'Long ago', savedAt: '2025-03-02T12:00:00.000Z' }),
+    ],
+  });
+  const r = await rig(client, { cols: 80, rows: 40 });
+  t.after(() => r.app.stop());
+  const body = r.app.frame().slice(2, -1).map((l) => l.trim()).filter((l) => l !== '');
+  const headings = body.filter((l) => /─{10}/.test(l)).map((l) => l.replace(/ ─+$/, ''));
+  assert.deepEqual(headings, ['Today', 'Yesterday', 'Past week', 'Past month', 'July', 'March 2025']);
+  // Each heading sits directly above the first row of its day.
+  assert.match(body[body.indexOf(body.find((l) => l.startsWith('Yesterday'))!) + 1]!, /Last night/);
+});
+
+test('a row\'s day heading scrolls into view with it', async (t) => {
+  const r = await rig(library(120), { cols: 80, rows: 12 });
+  t.after(() => r.app.stop());
+  // Walk down and back up across a day boundary, checking at every step
+  // that the selected row is on screen with its heading when it opens a day.
+  const steps = [...Array<string>(30).fill(DOWN), ...Array<string>(30).fill(UP)];
+  for (const key of steps) {
+    const frame = await r.press(key);
+    const body = frame.slice(2, -1);
+    const at = body.findIndex((l) => l.startsWith(' ▍ '));
+    assert.ok(at >= 0, 'the selected row is visible');
+    assert.ok(at + 1 < body.length, 'and so is its second line');
+    const selected = r.app.state.list.selected;
+    const opensDay = selected === 0 || new Date(r.app.state.list.items[selected]!.savedAt).getUTCDate()
+      !== new Date(r.app.state.list.items[selected - 1]!.savedAt).getUTCDate();
+    if (opensDay) assert.match(body[at - 1] ?? '', /─{10}/, `row ${selected} shows its heading`);
+  }
+});
+
+test('v switches between roomy and compact rows and remembers the choice', async (t) => {
+  const r = await rig();
+  t.after(() => r.app.stop());
+  let frame = r.app.frame();
+  assert.match(frame[4]!, /^ {3}Example · 2 min/);
+
+  frame = await r.press('v');
+  assert.equal(r.app.state.view, 'compact');
+  assert.match(frame[3]!, /^ ▍ Article 1 +Example · 2 min · 1h {2}$/);
+  assert.match(frame[4]!, /^ {3}Article 2 +Example · 2 min · 2h {2}$/);
+  assert.match(frame[23]!, /Compact rows\./);
+
+  frame = await r.press('v');
+  assert.equal(r.app.state.view, 'roomy');
+  assert.match(frame[4]!, /^ {3}Example · 2 min/);
+});
+
+test('the view chosen last time is the view it opens in', async (t) => {
+  const remembered: string[] = [];
+  const term: Terminal = {
+    cols: () => 80, rows: () => 24, paint: () => {}, open: () => {}, copy: () => true,
+    quit: () => {}, now: () => NOW, remember: (view) => { remembered.push(view); },
+  };
+  const app = createApp(library(), term, { view: 'compact' });
+  t.after(() => app.stop());
+  app.start();
+  await app.settled();
+  assert.match(app.frame()[3]!, /^ ▍ Article 1 +Example · 2 min · 1h {2}$/);
+  app.input('v');
+  assert.deepEqual(remembered, ['roomy']);
+});
+
+test('rows show an excerpt, tags, and how far through', async (t) => {
+  const client = library();
+  Object.assign(client.account.articles[0]!, {
+    excerpt: 'The  opening lines,\nwith untidy   whitespace.',
+    tags: [{ id: 't1', name: 'Tech', color: 'blue' }, { id: 't2', name: 'Long', color: 'red' }],
+    readProgress: 0.5,
+  });
+  const r = await rig(client);
+  t.after(() => r.app.stop());
+  const frame = r.app.frame();
+  assert.match(frame[3]!, /^ ▍ Article 1 +━━━─── {2}1h {2}$/);
+  assert.match(frame[4]!, /^ {3}Example · 2 min {2}The opening lines, with untidy whitespace\. +#Tech #Long {2}$/);
+  // Unread and finished articles carry no bar.
+  assert.ok(!frame[5]!.includes('━'));
+});
+
+test('a progress bar never claims nothing or everything by rounding', () => {
+  const bar = (f: number): string => progressBar(f, 6).map((s) => s.text).join('');
+  assert.equal(bar(0), '──────');
+  assert.equal(bar(0.01), '━─────');
+  assert.equal(bar(0.5), '━━━───');
+  assert.equal(bar(0.99), '━━━━━─');
+  assert.equal(bar(1), '━━━━━━');
+  assert.equal(bar(7), '━━━━━━');
+});
+
+test('a list still loading shows the shape of what is coming', async (t) => {
+  const r = await rig();
+  t.after(() => r.app.stop());
+  r.app.input(TAB);
+  const loading = r.app.frame();
+  assert.match(loading[0]!, /Loading $/);
+  assert.ok(loading.slice(3, 9).every((l) => /^ {3}[░▒]+$/.test(l)), 'placeholder rows');
+  await r.app.settled();
+  assert.ok(!r.screen().includes('░'));
+});
+
+test('notices say how it went: done, failed, or still going', async (t) => {
+  const r = await rig();
+  t.after(() => r.app.stop());
+  assert.match((await r.press('a'))[23]!, /^ ✓ Archived/);
+  r.client.failNext.archive = new ApiError('server', 500, 'The server answered 500.');
+  assert.match((await r.press('a'))[23]!, /^ ✕ Could not archive/);
+  assert.match((await r.press('uu'))[23]!, /^ • Nothing to undo/);
+
+  r.app.input(`shttps://example.org/slow${ENTER}`);
+  assert.match(r.app.frame()[23]!, /^ ⠋ Saving https:\/\/example\.org\/slow/);
+  assert.equal(r.app.state.notice!.tone, 'busy');
+  await r.app.settled();
+  assert.match(r.app.frame()[23]!, /^ ✓ Saved/);
+});
+
+test('an article opens where the reading stopped', async (t) => {
+  const client = library();
+  Object.assign(client.account.articles[0]!, {
+    content: Array.from({ length: 80 }, (_, i) => `<p>Paragraph ${i}.</p>`).join(''),
+    readProgress: 0.5,
+    wordCount: 2380,
+  });
+  const r = await rig(client);
+  t.after(() => r.app.stop());
+  let frame = await r.press(ENTER);
+  assert.ok(r.app.state.reader!.scroll > 50, 'opened partway down');
+  assert.ok(!frame.some((l) => l.includes('Paragraph 0.')));
+  assert.match(frame[23]!, /Picked up where you left off\. Press g for the top\./);
+  assert.match(frame[0]!, /\d min left {2}[━─]{12} +\d+% $/);
+
+  frame = await r.press('g');
+  assert.ok(frame.some((l) => l.includes('Paragraph 0.')));
+  // Resizing afterwards keeps the place it is at, not the place it resumed.
+  r.size.cols = 60;
+  r.app.resize();
+  assert.equal(r.app.state.reader!.scroll, 0);
+});
+
+test('the reader leaves the address out and keeps the tags', async (t) => {
+  const client = library();
+  client.account.tags = [{ id: 't1', name: 'Tech', color: 'blue' }];
+  client.account.tagged = { a1: ['t1'] };
+  const r = await rig(client);
+  t.after(() => r.app.stop());
+  const frame = await r.press(ENTER);
+  assert.ok(frame.some((l) => l.trim() === '#Tech'));
+  assert.ok(!frame.some((l) => l.includes('https://example.com/a1')));
+});
+
+test('help lines its two columns up section by section', async (t) => {
+  const r = await rig(library(), { cols: 100, rows: 30 });
+  t.after(() => r.app.stop());
+  const frame = await r.press('?');
+  for (const [left, right] of [['Move', 'Find'], ['Read', 'View'], ['Organize', 'Leave']]) {
+    assert.ok(frame.some((l) => new RegExp(`│ +${left} +${right} +│`).test(l)), `${left} beside ${right}`);
+  }
+  assert.ok(frame.some((l) => l.includes('╭')) && frame.some((l) => l.includes('╰')));
+  // Every key in the footer hints is explained here.
+  for (const key of ['v', 'u', 'esc', 'tab 1 2 3']) assert.ok(frame.some((l) => l.includes(` ${key} `)), key);
+});
+
+test('help on a small terminal still lists every key', async (t) => {
+  const r = await rig(library(), { cols: 50, rows: 24 });
+  t.after(() => r.app.stop());
+  const frame = await r.press('?');
+  for (const does of ['Move or scroll', 'Undo the last archive', 'Roomy or compact rows', 'Quit']) {
+    assert.ok(frame.some((l) => l.includes(does)), does);
+  }
+});
+
+test('help on a short terminal gives up titles, then its frame, before it gives up a key', async (t) => {
+  const every = ['Move or scroll', 'Save a link', 'Roomy or compact rows', 'Go back', 'Quit'];
+  for (const [rows, panel, titles] of [[22, true, true], [16, true, false], [12, false, false]] as const) {
+    const r = await rig(library(), { cols: 100, rows });
+    t.after(() => r.app.stop());
+    const frame = await r.press('?');
+    assert.equal(frame.some((l) => l.includes('╭')), panel, `panel at ${rows} rows`);
+    assert.equal(frame.some((l) => /\bOrganize\b/.test(l)), titles, `titles at ${rows} rows`);
+    for (const does of every) assert.ok(frame.some((l) => l.includes(does)), `${does} at ${rows} rows`);
+    for (const line of frame) assert.ok(stringWidth(line) <= 100);
+  }
+});
+
 test('the footer drops hints to fit, but never the way out', async (t) => {
   for (const cols of [120, 80, 60, 40, 24]) {
     const r = await rig(library(), { cols, rows: 12 });
@@ -525,7 +729,7 @@ test('the footer drops hints to fit, but never the way out', async (t) => {
   }
   const wide = await rig(library(), { cols: 120, rows: 12 });
   t.after(() => wide.app.stop());
-  assert.match(wide.app.frame()[11]!, /h highlights · tab lists · \? keys · q quit$/);
+  assert.match(wide.app.frame()[11]!, /h highlights {3}tab lists {3}\? keys {3}q quit$/);
 });
 
 test('keys typed before a list has loaded do nothing, rather than act on the old one', async (t) => {

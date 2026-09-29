@@ -199,7 +199,7 @@ async function runAuth(flags: Flags): Promise<number> {
 
   const config = { ...(existing ?? {}), serverUrl };
   const where = storeToken(config, token);
-  process.stderr.write(`Connected as ${account.email}.\n`);
+  process.stderr.write(`✓ Connected as ${account.email}.\n`);
   process.stderr.write(
     where === 'keychain'
       ? 'Key stored in the macOS Keychain.\n'

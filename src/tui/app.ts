@@ -4,14 +4,14 @@
 // read the frames it paints.
 import { ApiError, PAGE_SIZE, cursorAfter, loadForReading, type Client } from '../api.ts';
 import type { Article, Highlight } from '../types.ts';
-import { titleOf } from '../format.ts';
+import { progressOf, titleOf } from '../format.ts';
 import { articleHeader, lineOfHighlight, renderArticle } from '../layout.ts';
 import { destinationOf, normalizeUrl } from '../commands.ts';
 import { isPrintable, parseKeys } from './keys.ts';
-import { bodyHeight, highlightsBody, readingColumn, renderFrame } from './render.ts';
+import { bodyHeight, highlightsBody, listBody, readingColumn, renderFrame, rowHeight } from './render.ts';
 import {
   TABS, clampScroll, clampSelection, emptyList, initialState, isBusy, scrollToShow,
-  type Source, type State, type Tab,
+  type Source, type State, type Tab, type Tone, type View,
 } from './state.ts';
 
 export interface Terminal {
@@ -23,6 +23,12 @@ export interface Terminal {
   copy(text: string): boolean;
   quit(code: number): void;
   now(): Date;
+  /** Keep a preference for next time. */
+  remember?(view: View): void;
+}
+
+export interface AppOptions {
+  view?: View;
 }
 
 export interface App {
@@ -61,8 +67,8 @@ function say(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function createApp(client: Client, term: Terminal): App {
-  const state = initialState();
+export function createApp(client: Client, term: Terminal, options: AppOptions = {}): App {
+  const state = initialState(options.view);
   const inFlight = new Set<Promise<unknown>>();
   let stopped = false;
   let spinTimer: NodeJS.Timeout | null = null;
@@ -77,6 +83,8 @@ export function createApp(client: Client, term: Terminal): App {
   let tabBehindSearch: Tab = 'queue';
   // The highlight the reader was opened for, to scroll to once it has loaded.
   let seeking: string | null = null;
+  // True from opening an article until its text has been laid out once.
+  let resuming = false;
 
   const height = (): number => bodyHeight(term.rows());
 
@@ -94,11 +102,16 @@ export function createApp(client: Client, term: Terminal): App {
     }
   }
 
-  function notice(text: string): void {
-    state.notice = text;
+  function notice(text: string, tone: Tone = 'info'): void {
+    state.notice = { text, tone };
     if (noticeTimer !== null) clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(() => { state.notice = null; paint(); }, NOTICE_MS);
-    noticeTimer.unref();
+    noticeTimer = null;
+    // Work in progress stays up until whatever replaces it; everything else
+    // has said its piece after a few seconds.
+    if (tone !== 'busy') {
+      noticeTimer = setTimeout(() => { state.notice = null; paint(); }, NOTICE_MS);
+      noticeTimer.unref();
+    }
     paint();
   }
 
@@ -117,8 +130,20 @@ export function createApp(client: Client, term: Terminal): App {
   function showSelection(): void {
     const { list } = state;
     if (list.selected < 0) { list.scroll = 0; return; }
-    list.scroll = clampScroll(scrollToShow(list.scroll, list.selected, list.selected + 1, height()), list.items.length, height());
+    const { lines, blocks } = listBody(list, state.view, term.now(), term.cols());
+    const block = blocks[list.selected];
+    if (block === undefined) return;
+    // A row's date heading comes into view with it, so the first row of a
+    // day is never shown without saying which day.
+    list.scroll = clampScroll(
+      scrollToShow(list.scroll, block.start - block.lead, block.start + block.height, height()),
+      lines.length,
+      height(),
+    );
   }
+
+  // Nearly a screenful of rows, with one of overlap to keep the reader oriented.
+  const listPage = (): number => Math.max(1, Math.floor(height() / rowHeight(state.view)) - 1);
 
   function loadList(source: Source, keep = false): void {
     const ticket = ++listTicket;
@@ -181,7 +206,7 @@ export function createApp(client: Client, term: Terminal): App {
         if (ticket !== listTicket) return;
         // The rows already on screen are still good; say what happened and
         // let the next arrow key try again.
-        notice(say(err));
+        notice(say(err), 'error');
       } finally {
         if (ticket === listTicket) state.list.loadingMore = false;
       }
@@ -222,22 +247,36 @@ export function createApp(client: Client, term: Terminal): App {
     const progress = reader.scroll / total;
     reader.width = width;
     if (reader.loading) {
-      reader.lines = articleHeader(reader.article, width);
+      reader.lines = articleHeader(reader.article, width, false);
       reader.scroll = 0;
       return;
     }
     const rendered = renderArticle(reader.article, {
       width,
       highlights: reader.highlights,
+      showUrl: false,
+      hyperlinks: true,
       emptyHint: 'Press o to open it in your browser.',
     });
     reader.lines = rendered.lines;
+    const overflow = Math.max(0, reader.lines.length - height());
     if (seeking !== null) {
       // Open at the passage that was picked, with a little of what leads
       // into it.
       const line = lineOfHighlight(rendered.marks, seeking);
       reader.scroll = line === null ? 0 : line - 3;
       seeking = null;
+      resuming = false;
+    } else if (resuming) {
+      // Pick up where Quick Reads says the reading stopped, on any device.
+      resuming = false;
+      const left = progressOf(reader.article);
+      if (left !== null && overflow > 0) {
+        reader.scroll = Math.round(left * overflow);
+        // No number here: the header counts what has been on screen, which is
+        // a different measure from the saved position and would disagree.
+        if (reader.scroll > 0) notice('Picked up where you left off. Press g for the top.');
+      }
     } else {
       reader.scroll = Math.round(progress * reader.lines.length);
     }
@@ -247,6 +286,7 @@ export function createApp(client: Client, term: Terminal): App {
   function openReader(article: Article, from: 'list' | 'highlights', highlight: string | null = null): void {
     const ticket = ++readerTicket;
     seeking = highlight;
+    resuming = true;
     state.reader = {
       article, loading: true, error: null, highlights: [], lines: [], width: 0, scroll: 0, from,
     };
@@ -312,7 +352,7 @@ export function createApp(client: Client, term: Terminal): App {
     if (!quiet) {
       undo = { article: before, index: Math.max(0, index), tab, archived };
       const what = !archived ? 'Back in the queue' : before.list === 'todo' ? 'Done' : 'Archived';
-      notice(`${what}: ${titleOf(before)}. Press u to undo.`);
+      notice(`${what}: ${titleOf(before)}. Press u to undo.`, 'ok');
     }
 
     const ticket = listTicket;
@@ -323,7 +363,7 @@ export function createApp(client: Client, term: Terminal): App {
       } catch (err) {
         if (!quiet) undo = null;
         if (ticket === listTicket && index >= 0) restore(before, index, tab);
-        notice(`Could not ${archived ? 'archive' : 'unarchive'} that: ${say(err)}`);
+        notice(`Could not ${archived ? 'archive' : 'unarchive'} that: ${say(err)}`, 'error');
       }
     })());
   }
@@ -358,9 +398,9 @@ export function createApp(client: Client, term: Terminal): App {
         if (archived) await client.unarchive(article.id);
         else await client.archive(article.id);
         if (ticket === listTicket) restore(article, index, tab);
-        notice(`Undone: ${titleOf(article)}.`);
+        notice(`Undone: ${titleOf(article)}.`, 'ok');
       } catch (err) {
-        notice(`Could not undo that: ${say(err)}`);
+        notice(`Could not undo that: ${say(err)}`, 'error');
       }
     })());
   }
@@ -407,7 +447,7 @@ export function createApp(client: Client, term: Terminal): App {
       } catch (err) {
         if (ticket !== highlightsTicket || state.highlights === null) return;
         state.highlights.loading = false;
-        if (more) notice(say(err));
+        if (more) notice(say(err), 'error');
         else state.highlights.error = say(err);
       }
       paint();
@@ -458,7 +498,8 @@ export function createApp(client: Client, term: Terminal): App {
   function copy(text: string, what: string): void {
     // The terminal has been asked either way; only a confirming clipboard
     // lets us claim success out loud.
-    notice(term.copy(text) ? `${what} copied.` : `${what} sent to the terminal clipboard.`);
+    if (term.copy(text)) notice(`${what} copied.`, 'ok');
+    else notice(`${what} sent to the terminal clipboard.`);
   }
 
   function copyLink(article: Article | undefined): void {
@@ -468,9 +509,11 @@ export function createApp(client: Client, term: Terminal): App {
 
   function submitSave(value: string): void {
     const url = normalizeUrl(value);
-    if (url === null) return notice(`${value.trim() === '' ? 'That' : value.trim()} does not look like a web address.`);
+    if (url === null) {
+      return notice(`${value.trim() === '' ? 'That' : value.trim()} does not look like a web address.`, 'error');
+    }
     const tab = state.list.source.kind;
-    notice('Saving…');
+    notice(`Saving ${url}`, 'busy');
     track((async () => {
       try {
         const result = await client.save(url, tab === 'todo' ? { list: 'todo' } : {});
@@ -481,13 +524,13 @@ export function createApp(client: Client, term: Terminal): App {
           const { content: _, ...row } = article;
           state.list.items.unshift(row);
           state.list.selected = state.list.selected < 0 ? 0 : state.list.selected + 1;
-          if (state.list.scroll > 0) state.list.scroll += 1;
+          if (state.list.scroll > 0) state.list.scroll += rowHeight(state.view);
           showSelection();
         }
         const blocked = article.fetchBlocked === true ? ' The site refused the page, so only the link was kept.' : '';
-        notice(`Saved to ${home === 'todo' ? 'To Do' : 'your queue'}: ${titleOf(article)}.${blocked}`);
+        notice(`Saved to ${home === 'todo' ? 'To Do' : 'your queue'}: ${titleOf(article)}.${blocked}`, 'ok');
       } catch (err) {
-        notice(`Could not save that: ${say(err)}`);
+        notice(`Could not save that: ${say(err)}`, 'error');
       }
     })());
   }
@@ -524,6 +567,13 @@ export function createApp(client: Client, term: Terminal): App {
     paint();
   }
 
+  function toggleView(): void {
+    state.view = state.view === 'roomy' ? 'compact' : 'roomy';
+    term.remember?.(state.view);
+    showSelection();
+    notice(state.view === 'roomy' ? 'Roomy rows.' : 'Compact rows.');
+  }
+
   function showHelp(): void {
     if (state.screen === 'help') return;
     state.behindHelp = state.screen;
@@ -535,8 +585,8 @@ export function createApp(client: Client, term: Terminal): App {
     switch (key) {
       case 'up': case 'k': return moveSelection(-1);
       case 'down': case 'j': return moveSelection(1);
-      case 'pagedown': case ' ': return moveSelection(pageSize());
-      case 'pageup': case 'b': return moveSelection(-pageSize());
+      case 'pagedown': case ' ': return moveSelection(listPage());
+      case 'pageup': case 'b': return moveSelection(-listPage());
       case 'home': case 'g': return moveSelection(-state.list.items.length);
       case 'end': case 'G': return moveSelection(state.list.items.length);
       case 'enter': case 'right': case 'l': {
@@ -552,6 +602,7 @@ export function createApp(client: Client, term: Terminal): App {
       case '/': return ask('search');
       case 'h': state.screen = 'highlights'; return loadHighlights();
       case 'r': return loadList(state.list.source, true);
+      case 'v': return toggleView();
       case 'tab': return cycleTab(1);
       case 'shift-tab': return cycleTab(-1);
       case '1': return switchTab('queue');

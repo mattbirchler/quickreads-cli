@@ -19,7 +19,8 @@ export interface ListView {
   items: Article[];
   // Index into items, or -1 while the list is empty.
   selected: number;
-  // First visible row.
+  // First visible line of the list body. Lines, not items: rows can be two
+  // lines tall and date headings sit between them.
   scroll: number;
   loading: boolean;
   loadingMore: boolean;
@@ -57,6 +58,16 @@ export interface Prompt {
   value: string;
 }
 
+export type Tone = 'ok' | 'error' | 'busy' | 'info';
+
+export interface Notice {
+  text: string;
+  tone: Tone;
+}
+
+// Roomy rows are two lines with an excerpt; compact rows are one.
+export type View = 'roomy' | 'compact';
+
 export interface State {
   screen: 'list' | 'reader' | 'highlights' | 'help';
   // The screen the help was opened over.
@@ -66,7 +77,8 @@ export interface State {
   highlights: HighlightsView | null;
   prompt: Prompt | null;
   // A transient sentence in the footer (archived, copied, could not save).
-  notice: string | null;
+  notice: Notice | null;
+  view: View;
   // Spinner frame, advanced only while something is loading.
   spin: number;
 }
@@ -75,8 +87,9 @@ export function emptyList(source: Source): ListView {
   return { source, items: [], selected: -1, scroll: 0, loading: true, loadingMore: false, exhausted: false, error: null };
 }
 
-export function initialState(): State {
+export function initialState(view: View = 'roomy'): State {
   return {
+    view,
     screen: 'list',
     behindHelp: 'list',
     list: emptyList({ kind: 'queue' }),
@@ -90,7 +103,8 @@ export function initialState(): State {
 
 export function isBusy(state: State): boolean {
   return state.list.loading || state.list.loadingMore ||
-    state.reader?.loading === true || state.highlights?.loading === true;
+    state.reader?.loading === true || state.highlights?.loading === true ||
+    state.notice?.tone === 'busy';
 }
 
 /** Keep a selection inside [0, length), or -1 when there is nothing to select. */

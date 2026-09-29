@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactTime, readingTime, hostOf, titleOf, siteOf, rowMeta, count } from '../src/format.ts';
+process.env['TZ'] = 'UTC';
+
+import {
+  compactTime, readingTime, hostOf, titleOf, siteOf, rowMeta, count, dayGroup, timeLeft, progressOf,
+} from '../src/format.ts';
 import { stringWidth, truncate, padEnd, padStart, stripAnsi } from '../src/ansi.ts';
 import type { Article } from '../src/types.ts';
 
@@ -77,4 +81,43 @@ test('truncate and pad respect those widths', () => {
 
 test('stripAnsi removes styling and terminal titles', () => {
   assert.equal(stripAnsi('\x1b[1mbold\x1b[22m \x1b[38;2;1;2;3mink\x1b[39m\x1b]0;title\x07'), 'bold ink');
+});
+
+test('days are calendar days, not 24-hour windows', () => {
+  const at = (iso: string): string => dayGroup(new Date(iso), NOW).label;
+  assert.equal(at('2026-09-29T00:00:00Z'), 'Today');
+  assert.equal(at('2026-09-29T11:59:00Z'), 'Today');
+  // An hour and a minute before midnight is 13 hours ago, and yesterday.
+  assert.equal(at('2026-09-28T23:59:00Z'), 'Yesterday');
+  assert.equal(at('2026-09-28T00:00:00Z'), 'Yesterday');
+  assert.equal(at('2026-09-27T23:59:00Z'), 'Past week');
+  assert.equal(at('2026-09-23T00:00:00Z'), 'Past week');
+  assert.equal(at('2026-09-22T12:00:00Z'), 'Past month');
+  assert.equal(at('2026-08-31T12:00:00Z'), 'Past month');
+  assert.equal(at('2026-08-30T12:00:00Z'), 'August');
+  assert.equal(at('2025-12-25T12:00:00Z'), 'December 2025');
+  // A clock set wrong, or a save from a device in tomorrow's timezone.
+  assert.equal(at('2026-09-30T03:00:00Z'), 'Today');
+  assert.equal(at('nonsense'), 'Undated');
+});
+
+test('rows in the same month share a heading, and different years do not', () => {
+  const key = (iso: string): string => dayGroup(new Date(iso), NOW).key;
+  assert.equal(key('2026-07-01T12:00:00Z'), key('2026-07-31T12:00:00Z'));
+  assert.notEqual(key('2026-07-01T12:00:00Z'), key('2025-07-01T12:00:00Z'));
+});
+
+test('time left counts down and goes quiet near the end', () => {
+  assert.equal(timeLeft(2380, 0), '10 min left');
+  assert.equal(timeLeft(2380, 0.5), '5 min left');
+  assert.equal(timeLeft(2380, 0.98), '');
+  assert.equal(timeLeft(2380, 1), '');
+  assert.equal(timeLeft(0, 0.2), '');
+});
+
+test('progress only counts when it is under way', () => {
+  assert.equal(progressOf({ readProgress: 0.4 }), 0.4);
+  assert.equal(progressOf({ readProgress: 0 }), null);
+  assert.equal(progressOf({ readProgress: 1 }), null);
+  assert.equal(progressOf({}), null);
 });

@@ -3,7 +3,11 @@
 // live in tui/app.ts; this file only owns the real devices.
 import type { Client } from './api.ts';
 import { createApp, type Terminal } from './tui/app.ts';
-import { ALT_SCREEN_ON, ALT_SCREEN_OFF, HOME, CLEAR_LINE, CLEAR_BELOW } from './ansi.ts';
+import {
+  ALT_SCREEN_ON, ALT_SCREEN_OFF, HOME, CLEAR_LINE, CLEAR_BELOW, SYNC_ON, SYNC_OFF, WHEEL_ON, WHEEL_OFF, setBackground,
+} from './ansi.ts';
+import { probeBackground } from './tui/probe.ts';
+import { loadPreferences, savePreferences } from './preferences.ts';
 import { openUrl, copyToClipboard } from './platform.ts';
 
 // Auto-wrap off while the browser owns the screen: a line that came out one
@@ -23,28 +27,29 @@ export function runBrowse(client: Client): Promise<number> {
       if (!live) return;
       live = false;
       // Hand the tab title back before leaving the alt screen.
-      stdout.write(setTitle('') + WRAP_ON + ALT_SCREEN_OFF);
+      stdout.write(setTitle('') + WHEEL_OFF + WRAP_ON + ALT_SCREEN_OFF);
     };
 
     const term: Terminal = {
-      cols: () => stdout.columns ?? 80,
-      rows: () => stdout.rows ?? 24,
+      cols: () => stdout.columns || 80,
+      rows: () => stdout.rows || 24,
       paint(frame) {
         if (!live) return;
         // Each row ends by clearing to the end of its line rather than the
         // screen being cleared first, so a repaint never flashes blank.
-        stdout.write(HOME + frame.map((l) => l + CLEAR_LINE).join('\r\n') + CLEAR_BELOW);
+        stdout.write(SYNC_ON + HOME + frame.map((l) => l + CLEAR_LINE).join('\r\n') + CLEAR_BELOW + SYNC_OFF);
       },
       open: openUrl,
       copy: copyToClipboard,
       now: () => new Date(),
+      remember: (view) => savePreferences({ ...loadPreferences(), view }),
       quit(code) {
         teardown();
         resolve(code);
       },
     };
 
-    const app = createApp(client, term);
+    const app = createApp(client, term, { view: loadPreferences().view });
     const onKey = (chunk: Buffer): void => app.input(chunk.toString('utf8'));
     const onResize = (): void => app.resize();
     const onSignal = (): void => term.quit(0);
@@ -61,17 +66,24 @@ export function runBrowse(client: Client): Promise<number> {
       restoreScreen();
     }
 
-    stdout.write(ALT_SCREEN_ON + WRAP_OFF + setTitle('Quick Reads'));
+    stdout.write(ALT_SCREEN_ON + WRAP_OFF + WHEEL_ON + setTitle('Quick Reads'));
     stdin.setRawMode(true);
     stdin.resume();
-    stdin.on('data', onKey);
-    stdout.on('resize', onResize);
     process.on('SIGTERM', onSignal);
     process.on('SIGHUP', onSignal);
     // Whatever kills the process, the shell must not be left on the alternate
     // screen with its cursor hidden.
     process.on('exit', restoreScreen);
 
-    app.start();
+    // The first frame waits for the terminal to say what colour it is, so the
+    // screen is drawn once in the right inks rather than twice.
+    void probeBackground(stdin, stdout).then(({ rgb, typed }) => {
+      if (!live) return;
+      setBackground(rgb);
+      stdin.on('data', onKey);
+      stdout.on('resize', onResize);
+      app.start();
+      if (typed !== '') app.input(typed);
+    });
   });
 }
