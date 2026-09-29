@@ -7,7 +7,7 @@ import { loadForReading, walkArticles, type Client } from './api.ts';
 import type { Article, Highlight } from './types.ts';
 import type { Ref, RefStore } from './refs.ts';
 import { resolveRef } from './refs.ts';
-import { bold, ink2, ink3, accent, ok, warn, padStart, stringWidth, stripAnsi, truncate } from './ansi.ts';
+import { bold, ink2, ink3, accent, ok, padStart, stringWidth, stripAnsi, tagInk, truncate } from './ansi.ts';
 import { compactTime, count, rowMeta, siteOf, titleOf } from './format.ts';
 import { MAX_READING_WIDTH, renderArticle, wrapText } from './layout.ts';
 
@@ -20,6 +20,11 @@ export interface Io {
   now(): Date;
   /** Show long output a screen at a time. */
   page(lines: string[]): Promise<void>;
+  /**
+   * Say that something slow has started. Returns the function that says it
+   * has finished. Quick work never shows anything at all.
+   */
+  busy(label: string): () => void;
   open(url: string): void;
   readStdin(): Promise<string>;
   stdinIsTTY: boolean;
@@ -34,6 +39,16 @@ export interface CommandContext {
 }
 
 const DEFAULT_LIMIT = 25;
+
+/** Run `work` with a sign of life on screen for as long as it takes. */
+async function waiting<T>(io: Io, label: string, work: Promise<T>): Promise<T> {
+  const done = io.busy(label);
+  try {
+    return await work;
+  } finally {
+    done();
+  }
+}
 
 const refOf = (article: Article): Ref => ({ id: article.id, title: titleOf(article) });
 
@@ -83,11 +98,11 @@ const cell = (s: string): string => s.replace(/[\t\r\n]+/g, ' ');
 export async function list(ctx: CommandContext): Promise<number> {
   const { client, flags } = ctx;
   const archived = flags.archived;
-  const articles = await walkArticles(
+  const articles = await waiting(ctx.io, 'Loading', walkArticles(
     client,
     { archived, ...(flags.todo ? { list: 'todo' as const } : {}) },
     flags.limit ?? DEFAULT_LIMIT,
-  );
+  ));
   const empty = flags.todo
     ? (archived ? 'Nothing done yet.' : 'Nothing to do. Add something with `quickreads save --todo <url>`.')
     : (archived ? 'Your archive is empty.' : 'Your queue is empty. Save something with `quickreads save <url>`.');
@@ -106,7 +121,7 @@ export async function search(ctx: CommandContext): Promise<number> {
   let tagId: string | undefined;
   if (flags.tag !== null) {
     const wanted = flags.tag.replace(/^#/, '').trim().toLowerCase();
-    const tags = await client.tags();
+    const tags = await waiting(io, 'Searching', client.tags());
     const tag = tags.find((t) => t.name.toLowerCase() === wanted);
     if (tag === undefined) {
       io.err(`No tag called "${flags.tag}".${tags.length > 0 ? ` Yours are: ${tags.map((t) => t.name).join(', ')}.` : ''}`);
@@ -115,11 +130,11 @@ export async function search(ctx: CommandContext): Promise<number> {
     tagId = tag.id;
   }
 
-  const articles = await client.search({
+  const articles = await waiting(io, 'Searching', client.search({
     ...(query === '' ? {} : { query }),
     ...(tagId === undefined ? {} : { tagId }),
     limit: flags.limit ?? DEFAULT_LIMIT,
-  });
+  }));
   printArticles(ctx, articles, query === '' ? 'Nothing has that tag.' : `Nothing matches "${query}".`, true);
   return 0;
 }
@@ -139,7 +154,11 @@ export async function read(ctx: CommandContext): Promise<number> {
   const ref = articleFrom(ctx, args[0]);
   if (ref === null) return 2;
 
-  const { article, highlights } = await loadForReading(client, ref.id);
+  const { article, highlights } = await waiting(
+    io,
+    ref.title === '' ? 'Opening' : `Opening ${ref.title}`,
+    loadForReading(client, ref.id),
+  );
 
   if (flags.json) {
     io.out(JSON.stringify(article));
@@ -185,7 +204,7 @@ export function normalizeUrl(input: string): string | null {
 
 function describeSaved(article: Article, wantedTodo: boolean): string[] {
   const where = article.list === 'todo' ? 'To Do' : 'your queue';
-  const lines = [`${ok('Saved')} to ${where}: ${bold(titleOf(article))}`];
+  const lines = [`${ok('✓')} Saved to ${where}: ${bold(titleOf(article))}`];
   if (wantedTodo && article.list !== 'todo') {
     lines.push(ink2('  To Do is hidden on this account, so it went to the queue instead.'));
   }
@@ -210,7 +229,7 @@ export async function save(ctx: CommandContext): Promise<number> {
       io.err('There was nothing on standard input to save.');
       return 1;
     }
-    const article = await client.saveText(text, flags.title ?? undefined);
+    const article = await waiting(io, 'Saving', client.saveText(text, flags.title ?? undefined));
     if (flags.json) io.out(JSON.stringify(article));
     else if (flags.plain) io.out([article.id, titleOf(article), ''].map(cell).join('\t'));
     else for (const line of describeSaved(article, false)) io.out(line);
@@ -236,16 +255,16 @@ export async function save(ctx: CommandContext): Promise<number> {
       continue;
     }
     try {
-      const result = await client.save(url, {
+      const result = await waiting(io, `Saving ${url}`, client.save(url, {
         ...(flags.todo ? { list: 'todo' as const } : {}),
         ...(flags.title !== null ? { title: flags.title } : {}),
-      });
+      }));
       if (flags.json) {
         io.out(JSON.stringify(result.alreadySaved ? { ...result, url } : result.article));
       } else if (result.alreadySaved) {
         const where = result.readerUrl ?? (result.articleId === null ? '' : client.readerUrl(result.articleId));
         if (flags.plain) io.out([result.articleId ?? '', '', url].join('\t'));
-        else io.out(`${warn('Already saved')}: ${url}${where === '' ? '' : ink3(`\n  ${where}`)}`);
+        else io.out(`${accent('•')} Already saved: ${url}${where === '' ? '' : ink3(`\n  ${where}`)}`);
       } else if (flags.plain) {
         io.out([result.article.id, titleOf(result.article), result.article.url].map(cell).join('\t'));
       } else {
@@ -292,10 +311,10 @@ export async function highlights(ctx: CommandContext): Promise<number> {
   if (args[0] !== undefined) {
     const ref = articleFrom(ctx, args[0]);
     if (ref === null) return 2;
-    const [found, article] = await Promise.all([
+    const [found, article] = await waiting(io, 'Loading', Promise.all([
       client.articleHighlights(ref.id),
       ref.title === '' ? client.article(ref.id).catch(() => null) : Promise.resolve(null),
-    ]);
+    ]));
     if (flags.json || flags.plain) {
       printHighlightRows(ctx, found);
       return 0;
@@ -316,13 +335,18 @@ export async function highlights(ctx: CommandContext): Promise<number> {
   const limit = flags.limit ?? DEFAULT_LIMIT;
   const found: Highlight[] = [];
   let total = 0;
-  // The API caps a page at 200; a bigger ask walks.
-  while (found.length < limit) {
-    const want = Math.min(200, limit - found.length);
-    const page = await client.highlights({ limit: want, offset: found.length });
-    total = page.total;
-    found.push(...page.highlights);
-    if (page.highlights.length < want) break;
+  const done = io.busy('Loading');
+  try {
+    // The API caps a page at 200; a bigger ask walks.
+    while (found.length < limit) {
+      const want = Math.min(200, limit - found.length);
+      const page = await client.highlights({ limit: want, offset: found.length });
+      total = page.total;
+      found.push(...page.highlights);
+      if (page.highlights.length < want) break;
+    }
+  } finally {
+    done();
   }
 
   // Each numbered row is a highlight; the number opens its article.
@@ -366,11 +390,15 @@ async function setArchived(ctx: CommandContext, archived: boolean): Promise<numb
     refs.push(ref);
   }
   for (const ref of refs) {
-    if (archived) await client.archive(ref.id);
-    else await client.unarchive(ref.id);
+    const name = ref.title === '' ? ref.id : ref.title;
+    await waiting(
+      io,
+      `${archived ? 'Archiving' : 'Unarchiving'} ${name}`,
+      archived ? client.archive(ref.id) : client.unarchive(ref.id),
+    );
     if (flags.json) io.out(JSON.stringify({ id: ref.id, archived }));
     else if (flags.plain) io.out([ref.id, archived ? 'archived' : 'queue'].join('\t'));
-    else io.out(`${archived ? 'Archived' : 'Back in the queue'}: ${bold(ref.title === '' ? ref.id : ref.title)}`);
+    else io.out(`${ok('✓')} ${archived ? 'Archived' : 'Back in the queue'}: ${bold(name)}`);
   }
   return 0;
 }
@@ -387,16 +415,16 @@ export async function open(ctx: CommandContext): Promise<number> {
   const { client, io, args } = ctx;
   const ref = articleFrom(ctx, args[0]);
   if (ref === null) return 2;
-  const article = await client.article(ref.id);
+  const article = await waiting(io, 'Opening', client.article(ref.id));
   const url = destinationOf(article, client);
   io.open(url);
-  io.out(`Opened ${bold(titleOf(article))}\n${ink3(`  ${url}`)}`);
+  io.out(`${ok('✓')} Opened ${bold(titleOf(article))}\n${ink3(`  ${url}`)}`);
   return 0;
 }
 
 export async function tags(ctx: CommandContext): Promise<number> {
   const { client, io, flags } = ctx;
-  const found = await client.tags();
+  const found = await waiting(io, 'Loading', client.tags());
   if (flags.json) {
     for (const t of found) io.out(JSON.stringify(t));
     return 0;
@@ -411,7 +439,8 @@ export async function tags(ctx: CommandContext): Promise<number> {
   }
   const widest = Math.max(...found.map((t) => stringWidth(t.name)));
   for (const t of found) {
-    io.out(` ${bold(t.name)}${' '.repeat(widest - stringWidth(t.name) + 2)}${ink3(count(t.articleCount ?? 0, 'article'))}`);
+    const gap = ' '.repeat(widest - stringWidth(t.name) + 2);
+    io.out(` ${tagInk(t.color, '●')} ${bold(t.name)}${gap}${ink3(count(t.articleCount ?? 0, 'article'))}`);
   }
   if (io.isTTY) io.out(ink3('\n See what has one with `quickreads search --tag <name>`.'));
   return 0;
@@ -419,7 +448,7 @@ export async function tags(ctx: CommandContext): Promise<number> {
 
 export async function whoami(ctx: CommandContext): Promise<number> {
   const { client, io, flags } = ctx;
-  const account = await client.me();
+  const account = await waiting(io, 'Loading', client.me());
   if (flags.json) io.out(JSON.stringify(account));
   else if (flags.plain) io.out([account.email, account.tier].join('\t'));
   else io.out(`${bold(account.email)}  ${ink3(`${account.tier} · ${client.serverUrl}`)}`);

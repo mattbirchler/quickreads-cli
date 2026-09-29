@@ -158,6 +158,9 @@ export interface FakeIo extends Io {
   stderr: string[];
   paged: string[][];
   opened: string[];
+  // Every label passed to busy(), and how many of them have finished.
+  waits: string[];
+  finished: number;
   stored: Ref[] | null;
   stdin: string;
 }
@@ -168,6 +171,8 @@ export function fakeIo(over: Partial<FakeIo> = {}): FakeIo {
     stderr: [],
     paged: [],
     opened: [],
+    waits: [],
+    finished: 0,
     stored: null,
     stdin: '',
     isTTY: false,
@@ -179,6 +184,10 @@ export function fakeIo(over: Partial<FakeIo> = {}): FakeIo {
     now: () => NOW,
     page: async (lines) => { io.paged.push(lines); },
     open: (url) => { io.opened.push(url); },
+    busy: (label) => {
+      io.waits.push(label);
+      return () => { io.finished += 1; };
+    },
     readStdin: async () => io.stdin,
     refs: {
       load: () => io.stored,

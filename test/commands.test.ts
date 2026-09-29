@@ -192,7 +192,7 @@ test('a link with no text says how to open it', async () => {
 test('save puts a URL in the queue', async () => {
   const { code, io, client } = await run('save', ['https://example.org/new']);
   assert.equal(code, 0);
-  assert.deepEqual(io.stdout, ['Saved to your queue: A Saved Page']);
+  assert.deepEqual(io.stdout, ['✓ Saved to your queue: A Saved Page']);
   assert.equal(client.calls[0], 'save {"url":"https://example.org/new"}');
 });
 
@@ -211,7 +211,7 @@ test('save refuses what is not an address, before asking the server', async () =
 
 test('save --todo with a title lands in To Do under that title', async () => {
   const { io, client } = await run('save', ['https://example.org/app'], { todo: true, title: 'Try this' });
-  assert.deepEqual(io.stdout, ['Saved to To Do: Try this']);
+  assert.deepEqual(io.stdout, ['✓ Saved to To Do: Try this']);
   assert.equal(client.account.articles[0]!.list, 'todo');
 });
 
@@ -219,14 +219,14 @@ test('save says so when a hidden To Do list sent it to the queue', async () => {
   const client = library();
   client.account.todoHidden = true;
   const { io } = await run('save', ['https://example.org/app'], { todo: true }, client);
-  assert.equal(io.stdout[0], 'Saved to your queue: A Saved Page');
+  assert.equal(io.stdout[0], '✓ Saved to your queue: A Saved Page');
   assert.match(io.stdout[1]!, /To Do is hidden on this account/);
 });
 
 test('saving something twice points at the copy you have', async () => {
   const { code, io } = await run('save', ['https://example.com/a1']);
   assert.equal(code, 0);
-  assert.deepEqual(io.stdout, ['Already saved: https://example.com/a1', '  https://quickreads.test/app/read/a1']);
+  assert.deepEqual(io.stdout, ['• Already saved: https://example.com/a1', '  https://quickreads.test/app/read/a1']);
 });
 
 test('save takes several URLs and keeps going past a bad one', async () => {
@@ -255,7 +255,7 @@ test('save --text saves what was piped in', async () => {
   const io = fakeIo({ stdinIsTTY: false, stdin: '# My notes\n\nSome thoughts.' });
   const { code, client } = await run('save', [], { text: true }, library(), io);
   assert.equal(code, 0);
-  assert.deepEqual(io.stdout, ['Saved to your queue: My notes']);
+  assert.deepEqual(io.stdout, ['✓ Saved to your queue: My notes']);
   assert.ok(client.calls[0]!.startsWith('saveText'));
   // With nothing piped there is nothing to read; say how instead of hanging.
   assert.equal((await run('save', [], { text: true })).code, 2);
@@ -349,12 +349,12 @@ test('archive and unarchive say what they moved', async () => {
   await run('list', [], {}, client, io);
   io.stdout.length = 0;
   await run('archive', ['1', '2'], {}, client, io);
-  assert.deepEqual(io.stdout, ['Archived: Native app propaganda', 'Archived: A deep dive into HDR']);
+  assert.deepEqual(io.stdout, ['✓ Archived: Native app propaganda', '✓ Archived: A deep dive into HDR']);
   assert.ok(client.account.articles.slice(0, 2).every((a) => a.archivedAt !== null));
 
   io.stdout.length = 0;
   await run('unarchive', ['a1'], {}, client, io);
-  assert.deepEqual(io.stdout, ['Back in the queue: Native app propaganda']);
+  assert.deepEqual(io.stdout, ['✓ Back in the queue: Native app propaganda']);
   assert.equal(client.account.articles[0]!.archivedAt, null);
 });
 
@@ -380,10 +380,49 @@ test('open goes to Quick Reads when there is no original page', async () => {
 });
 
 test('tags lists names and counts', async () => {
-  assert.deepEqual((await run('tags')).io.stdout, [' Tech  1 article']);
+  assert.deepEqual((await run('tags')).io.stdout, [' ● Tech  1 article']);
   assert.deepEqual((await run('tags', [], {}, fakeClient())).io.stdout, ['No tags yet.']);
 });
 
 test('whoami names the account', async () => {
   assert.deepEqual((await run('whoami')).io.stdout, ['reader@example.test  pro · https://quickreads.test']);
+});
+
+test('slow work says what it is doing, and always says when it has stopped', async () => {
+  const saved = await run('save', ['https://example.org/new']);
+  assert.deepEqual(saved.io.waits, ['Saving https://example.org/new']);
+  assert.equal(saved.io.finished, 1);
+
+  const io = fakeIo();
+  const client = library();
+  await run('list', [], {}, client, io);
+  await run('read', ['1'], {}, client, io);
+  await run('archive', ['1', '2'], {}, client, io);
+  assert.deepEqual(io.waits, [
+    'Loading',
+    'Opening Native app propaganda',
+    'Archiving Native app propaganda',
+    'Archiving A deep dive into HDR',
+  ]);
+  assert.equal(io.finished, 4);
+
+  // A failure must not leave the spinner running.
+  const broken = library();
+  broken.failNext.search = new ApiError('server', 500, 'boom');
+  const failing = fakeIo();
+  await assert.rejects(run('search', ['x'], {}, broken, failing));
+  assert.equal(failing.finished, failing.waits.length);
+
+  const paged = library();
+  paged.failNext.highlights = new ApiError('server', 500, 'boom');
+  const failingToo = fakeIo();
+  await assert.rejects(run('highlights', [], {}, paged, failingToo));
+  assert.equal(failingToo.finished, failingToo.waits.length);
+});
+
+test('machine output carries no marks', async () => {
+  const plain = await run('save', ['https://example.org/new'], { plain: true });
+  assert.ok(!plain.io.stdout.join('').includes('✓'));
+  const json = await run('archive', ['a1'], { json: true });
+  assert.deepEqual(json.io.stdout.map((l) => JSON.parse(l)), [{ id: 'a1', archived: true }]);
 });
