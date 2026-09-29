@@ -13,8 +13,8 @@ Usage:
   quickreads save <url>...           Save to your queue
   quickreads search <words>          Search everything you have saved
   quickreads highlights [<article>]  Your highlights, newest first
-  quickreads archive <article>       Archive an article
-  quickreads unarchive <article>     Return an article to the queue
+  quickreads archive <article>...    Archive articles
+  quickreads unarchive <article>...  Return articles to the queue
   quickreads open <article>          Open an article in your browser
   quickreads tags                    List your tags
   quickreads whoami                  Show the connected account

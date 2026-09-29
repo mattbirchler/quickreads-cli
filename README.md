@@ -1,0 +1,169 @@
+# quickreads
+
+[Quick Reads](https://quickreads.app) in your terminal. Browse your queue,
+read articles, save links, search your library, and look through your
+highlights.
+
+```
+ Quick Reads  Queue  To Do  Archive                        23 articles
+ 
+  Native app propaganda is working          Birchtree · 6 min · 2h
+  A deep dive into HDR screenshots   Six Colors · 12 min · 40% · 5h
+  Nintendo announces a thing               The Verge · 4 min · 1d
+
+ ↑/↓ move · ↵ read · a archive · / search · s save · ? keys · q quit
+```
+
+It talks to the [public Quick Reads API](https://quickreads.app/docs), so you
+need a Quick Reads account and an API key.
+
+## Install
+
+With [Homebrew](https://brew.sh) on macOS or Linux:
+
+```sh
+brew install mattbirchler/tap/quickreads
+```
+
+Or from a clone, on Node 26 or later:
+
+```sh
+git clone https://github.com/mattbirchler/quickreads-cli.git
+cd quickreads-cli
+npm link
+```
+
+## Connect your account
+
+Create an API key in Quick Reads under Settings, Developer. Then run:
+
+```sh
+quickreads auth
+```
+
+Paste the key when asked. On a Mac the key goes in the Keychain. Everywhere
+else it goes in `~/.config/quickreads/config.json`, which only you can read.
+
+Set `QUICKREADS_TOKEN` to use a different key for one command. Set
+`QUICKREADS_NO_KEYCHAIN=1` on a Mac you reach over SSH, where the Keychain
+cannot show its unlock prompt. `quickreads logout` removes the key from the
+machine.
+
+## Browse
+
+Run `quickreads` with no arguments.
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` or `k` `j` | Move the selection, or scroll the article |
+| `Space` `b` | Page down, page up |
+| `g` `G` | Jump to the top, the bottom |
+| `Enter` | Read the selected article |
+| `a` | Archive. In the archive, send it back to the queue |
+| `u` | Undo the last archive |
+| `s` | Save a link to the list you are looking at |
+| `/` | Search everything you have saved |
+| `h` | Your highlights. Enter opens the article at that passage |
+| `Tab` or `1` `2` `3` | Switch between Queue, To Do, and Archive |
+| `o` | Open the original page in your browser |
+| `c` | Copy the link, or the highlight |
+| `r` | Refresh |
+| `?` | Show every key |
+| `Esc` | Go back |
+| `q` | Quit |
+
+Archiving happens on screen right away and `u` takes it back, so a stray `a`
+costs one keypress.
+
+## Commands
+
+Every part of the browser is also a command, for scripts and for when you
+already know what you want.
+
+```sh
+quickreads list                     # the queue, newest first
+quickreads list --archived          # the archive
+quickreads list --todo              # your To Do list
+quickreads list --limit 100         # more rows, the default is 25
+
+quickreads read 3                   # read row 3 of the last listing
+quickreads read 3 --width 60        # wrap narrower than the default 80
+
+quickreads save https://example.com/post
+quickreads save example.com/app --todo --title "Try this"
+pbpaste | quickreads save           # URLs from a pipe, one per line
+pbpaste | quickreads save --text    # save the text itself, markdown welcome
+
+quickreads search apple silicon
+quickreads search --tag tech        # everything with a tag
+quickreads search hdr --tag tech    # both
+
+quickreads highlights               # newest first, across every article
+quickreads highlights 3             # the highlights in one article
+
+quickreads archive 1 2 3
+quickreads unarchive 1
+quickreads open 2                   # in your browser
+quickreads tags
+quickreads whoami
+```
+
+### Article numbers
+
+`list`, `search`, and `highlights` number their rows. Any command that takes an
+article accepts one of those numbers, and it means the row from the most recent
+listing. It also accepts an article id or a link to the article in Quick Reads.
+
+`archive 1 2 3` checks all three numbers before it changes anything. A typo
+stops the command instead of archiving two articles out of three.
+
+### Output for scripts
+
+`--json` prints one JSON object per line, exactly as the API returned it.
+`--plain` prints tab-separated columns.
+
+| Command | `--plain` columns |
+|---------|-------------------|
+| `list`, `search` | id, saved at, site, title, URL |
+| `highlights` | article id, created at, text, note |
+| `save` | id, title, URL |
+| `tags` | id, name, article count |
+
+```sh
+quickreads list --json | jq -r 'select(.wordCount > 3000) | .title'
+quickreads list --plain | cut -f5 | head -5
+quickreads highlights --limit 500 --plain | cut -f3 > highlights.txt
+```
+
+Hints and colour appear only when the output is a terminal. In a pipe, an empty
+result prints nothing with `--json` or `--plain`. `NO_COLOR` turns colour off
+everywhere.
+
+## Reading
+
+Articles wrap to 80 columns at most. Long ones open in your pager, which is
+`$QUICKREADS_PAGER`, then `$PAGER`, then `less`. `--no-pager` prints instead.
+
+Links are underlined and numbered, with the addresses listed at the end of the
+article. Passages you highlighted in Quick Reads are marked in yellow. Images
+appear as their alt text.
+
+Some saves have no article text. A To Do item is a link by design, and some
+sites refuse to serve their pages to Quick Reads. The reader says which one
+happened, and `o` opens the page in your browser.
+
+## Development
+
+Plain TypeScript that Node 26 runs directly. No dependencies and no build step.
+
+```sh
+node --test test/*.test.ts
+node bin/quickreads.ts help
+```
+
+To run against a different server, pass `--server` to `quickreads auth`. Set
+`QUICKREADS_HOME` to keep config and cache in a directory of your choosing.
+
+## License
+
+MIT
