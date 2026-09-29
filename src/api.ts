@@ -1,7 +1,7 @@
 // The one place HTTP happens. Callers get JSON or an ApiError whose `kind`
 // they can switch on; nobody else parses status codes. Every endpoint here is
 // one the public docs describe (https://quickreads.app/docs).
-import type { Account } from './types.ts';
+import type { Account, Article, ArticleList, Highlight, HighlightsPage, Tag } from './types.ts';
 
 export type ApiErrorKind =
   | 'unauthorized'
@@ -91,11 +91,153 @@ export function createRequester(serverUrl: string, token: string, fetchImpl: typ
   };
 }
 
-export { READ_TIMEOUT_MS, SAVE_TIMEOUT_MS };
-
 // What `quickreads auth` calls to prove a pasted key works. /api/me answers
 // even for an account with no subscription, so a lapsed user still gets a
 // truthful "connected" plus their tier.
 export async function verifyToken(serverUrl: string, token: string, fetchImpl: typeof fetch = fetch): Promise<Account> {
   return createRequester(serverUrl, token, fetchImpl)<Account>('GET', '/api/me');
+}
+
+export interface ListParams {
+  // The archive instead of the queue (or done items instead of open To Dos).
+  archived?: boolean;
+  list?: ArticleList;
+  limit?: number;
+  // Where the previous page ended: its last article's timestamp and id.
+  before?: { at: string; id: string };
+}
+
+export interface SaveOptions {
+  list?: ArticleList;
+  title?: string;
+}
+
+// A URL that is already in the library is an answer, not a failure: the
+// caller gets the existing article to point at.
+export type SaveResult =
+  | { alreadySaved: false; article: Article }
+  | { alreadySaved: true; articleId: string | null; readerUrl: string | null };
+
+export interface Client {
+  serverUrl: string;
+  me(): Promise<Account>;
+  /** One page of a list, newest first, without article bodies. */
+  articles(params?: ListParams): Promise<Article[]>;
+  /** One article with its full content. */
+  article(id: string): Promise<Article>;
+  save(url: string, options?: SaveOptions): Promise<SaveResult>;
+  saveText(text: string, title?: string): Promise<Article>;
+  search(params: { query?: string; tagId?: string; limit?: number }): Promise<Article[]>;
+  archive(id: string): Promise<void>;
+  unarchive(id: string): Promise<void>;
+  highlights(params?: { limit?: number; offset?: number }): Promise<HighlightsPage>;
+  articleHighlights(id: string): Promise<Highlight[]>;
+  tags(): Promise<Tag[]>;
+  /** Where this article lives in the Quick Reads web app. */
+  readerUrl(id: string): string;
+}
+
+export const PAGE_SIZE = 50;
+
+export function createClient(serverUrl: string, token: string, fetchImpl: typeof fetch = fetch): Client {
+  const request = createRequester(serverUrl, token, fetchImpl);
+  const at = (id: string) => `/api/articles/${encodeURIComponent(id)}`;
+
+  return {
+    serverUrl,
+    me: () => request<Account>('GET', '/api/me'),
+
+    articles(params = {}) {
+      const archived = params.archived === true;
+      // Bodies stay on the server until an article is opened: a page of
+      // articles with content can run to megabytes.
+      const q = new URLSearchParams({ limit: String(params.limit ?? PAGE_SIZE), includeContent: 'false' });
+      if (archived) q.set('archived', 'true');
+      if (params.list !== undefined && params.list !== 'queue') q.set('list', params.list);
+      if (params.before !== undefined) {
+        q.set(archived ? 'beforeArchivedAt' : 'beforeSavedAt', params.before.at);
+        q.set('beforeId', params.before.id);
+      }
+      return request<Article[]>('GET', `/api/articles?${q.toString()}`);
+    },
+
+    article: (id) => request<Article>('GET', at(id)),
+
+    async save(url, options = {}) {
+      const body: Record<string, unknown> = { url, source: 'api' };
+      if (options.list !== undefined) body['list'] = options.list;
+      if (options.title !== undefined) body['title'] = options.title;
+      try {
+        const article = await request<Article>('POST', '/api/articles', body, SAVE_TIMEOUT_MS);
+        return { alreadySaved: false, article };
+      } catch (err) {
+        if (err instanceof ApiError && err.kind === 'conflict') {
+          const { articleId, readerUrl } = err.body;
+          return {
+            alreadySaved: true,
+            articleId: typeof articleId === 'string' ? articleId : null,
+            readerUrl: typeof readerUrl === 'string' ? readerUrl : null,
+          };
+        }
+        throw err;
+      }
+    },
+
+    saveText(text, title) {
+      const body: Record<string, unknown> = { text, source: 'api' };
+      if (title !== undefined) body['title'] = title;
+      return request<Article>('POST', '/api/articles/text', body, SAVE_TIMEOUT_MS);
+    },
+
+    search(params) {
+      const q = new URLSearchParams({ limit: String(params.limit ?? PAGE_SIZE) });
+      if (params.query !== undefined && params.query !== '') q.set('q', params.query);
+      if (params.tagId !== undefined) q.set('tag', params.tagId);
+      return request<Article[]>('GET', `/api/articles/search?${q.toString()}`);
+    },
+
+    async archive(id) {
+      await request<unknown>('POST', `${at(id)}/archive`);
+    },
+    async unarchive(id) {
+      await request<unknown>('POST', `${at(id)}/unarchive`);
+    },
+
+    highlights(params = {}) {
+      const q = new URLSearchParams({ limit: String(params.limit ?? PAGE_SIZE) });
+      if (params.offset !== undefined && params.offset > 0) q.set('offset', String(params.offset));
+      return request<HighlightsPage>('GET', `/api/highlights?${q.toString()}`);
+    },
+    articleHighlights: (id) => request<Highlight[]>('GET', `${at(id)}/highlights`),
+
+    tags: () => request<Tag[]>('GET', '/api/tags'),
+
+    readerUrl: (id) => `${serverUrl}/app/read/${encodeURIComponent(id)}`,
+  };
+}
+
+/** The cursor that continues a list after this article. */
+export function cursorAfter(article: Article, archived: boolean): { at: string; id: string } | null {
+  const at = archived ? article.archivedAt : article.savedAt;
+  return at === null ? null : { at, id: article.id };
+}
+
+/**
+ * Up to `limit` articles, walking as many pages as that takes. The cursor
+ * (rather than an offset) is what keeps the walk honest when something is
+ * archived halfway through it.
+ */
+export async function walkArticles(client: Client, params: ListParams, limit: number): Promise<Article[]> {
+  const out: Article[] = [];
+  let before = params.before;
+  while (out.length < limit) {
+    const want = Math.min(100, limit - out.length);
+    const page = await client.articles({ ...params, limit: want, before });
+    out.push(...page);
+    if (page.length < want) break;
+    const next = cursorAfter(page[page.length - 1]!, params.archived === true);
+    if (next === null) break;
+    before = next;
+  }
+  return out;
 }
