@@ -11,6 +11,8 @@ export interface Style {
   code?: boolean;
   // Link text: underlined, and followed by a numbered marker.
   link?: boolean;
+  // Where the link goes, for terminals that can open it on a click.
+  href?: string;
   // Apparatus rather than prose: link markers, image descriptions.
   note?: boolean;
   // Part of a passage the reader highlighted.
@@ -112,7 +114,7 @@ function resolveHref(href: string | null, baseUrl: string | undefined): string |
 
 const sameStyle = (a: Style, b: Style): boolean =>
   !a.bold === !b.bold && !a.italic === !b.italic && !a.code === !b.code &&
-  !a.link === !b.link && !a.note === !b.note && !a.mark === !b.mark;
+  !a.link === !b.link && !a.note === !b.note && !a.mark === !b.mark && a.href === b.href;
 
 /**
  * One block's spans, tidied: whitespace collapsed to single spaces (across
@@ -208,7 +210,10 @@ export function parseHtml(html: string, baseUrl?: string): Document {
     if (bold > 0) s.bold = true;
     if (italic > 0 || caption) s.italic = true;
     if (code > 0) s.code = true;
-    if (link !== null) s.link = true;
+    if (link !== null) {
+      s.link = true;
+      s.href = link.href;
+    }
     return s;
   };
 
@@ -297,7 +302,7 @@ export function parseHtml(html: string, baseUrl?: string): Document {
         if (said !== '' && !bare) {
           let n = links.indexOf(link.href) + 1;
           if (n === 0) n = links.push(link.href);
-          const { link: _, ...rest } = style();
+          const { link: _, href: __, ...rest } = style();
           spans.push({ ...rest, text: `[${n}]`, note: true });
         }
       }

@@ -148,16 +148,23 @@ export async function read(ctx: CommandContext): Promise<number> {
 
   const margin = io.isTTY && !flags.plain ? 2 : 0;
   const width = flags.width ?? Math.max(20, Math.min(MAX_READING_WIDTH, io.cols - margin * 2));
-  const { lines } = renderArticle(article, {
-    width,
-    highlights,
-    emptyHint: `Open it with \`quickreads open ${args[0]}\`.`,
-  });
-  const pad = ' '.repeat(margin);
-  const text = lines.map((l) => (l === '' ? '' : pad + (flags.plain ? stripAnsi(l) : l)));
+  const render = (hyperlinks: boolean): string[] => {
+    const { lines } = renderArticle(article, {
+      width,
+      highlights,
+      hyperlinks,
+      emptyHint: `Open it with \`quickreads open ${args[0]}\`.`,
+    });
+    const pad = ' '.repeat(margin);
+    return lines.map((l) => (l === '' ? '' : pad + (flags.plain ? stripAnsi(l) : l)));
+  };
 
+  // Links are clickable when the article goes straight to the terminal. A
+  // pager may print the escape sequence instead of obeying it, so paged
+  // output goes without.
+  const text = render(false);
   if (io.isTTY && !flags.plain && !flags.noPager && text.length > io.rows - 2) await io.page(text);
-  else for (const line of text) io.out(line);
+  else for (const line of io.isTTY && !flags.plain ? render(true) : text) io.out(line);
   return 0;
 }
 

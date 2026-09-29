@@ -112,7 +112,10 @@ test('the header carries title, source line, tags and address', () => {
     'Example · Ada Writer · Sep 15, 2026 · 5 min read',
     '#Tech',
     'https://example.com/post',
+    '─'.repeat(24),
   ]);
+  // The interactive reader leaves the address out: o and c are one key away.
+  assert.ok(!articleHeader(article(), 60, false).some((l) => l.includes('https://')));
 });
 
 test('a placeholder address is not shown as if it went somewhere', () => {
@@ -136,4 +139,15 @@ test('a saved link explains why there is nothing to read', () => {
   assert.ok(blocked.lines.join(' ').includes('Press o to open it.'));
   const todo = renderArticle(article({ type: 'link', content: null, wordCount: 0, list: 'todo' }), { width: 70 });
   assert.ok(todo.lines.join(' ').includes('To Do item'));
+});
+
+test('output for a pipe carries no escape sequences at all', () => {
+  const { lines } = renderArticle(
+    article({ content: '<p>See <a href="https://a.example/">this</a>.</p><pre>code()</pre><blockquote><p>Quoted.</p></blockquote>' }),
+    { width: 60, hyperlinks: true },
+  );
+  assert.ok(lines.every((l) => !l.includes('\x1b')));
+  assert.ok(lines.includes('See this[1].'));
+  assert.ok(lines.includes('  code()'));
+  assert.ok(lines.includes('│ Quoted.'));
 });
