@@ -19,7 +19,7 @@ const CLEAR = '\r\x1b[K';
 function spinner(label: string): () => void {
   const { stderr } = process;
   if (stderr.isTTY !== true) return () => {};
-  const text = truncate(label.replace(/\s+/g, ' '), Math.max(8, (stderr.columns ?? 80) - 4));
+  const text = truncate(label.replace(/\s+/g, ' '), Math.max(8, (stderr.columns || 80) - 4));
   let frame = 0;
   let shown = false;
   let ticking: NodeJS.Timeout | null = null;
@@ -45,7 +45,8 @@ export function terminalIo(): Io {
     err: (line) => { process.stderr.write(`${line}\n`); },
     isTTY: process.stdout.isTTY === true,
     stdinIsTTY: process.stdin.isTTY === true,
-    cols: process.stdout.columns ?? 80,
+    // A terminal that reports no size reports 0, which is not a width.
+    cols: process.stdout.columns || 80,
     rows: process.stdout.rows ?? 24,
     now: () => new Date(),
     page: (lines) => page(`${lines.join('\n')}\n`),

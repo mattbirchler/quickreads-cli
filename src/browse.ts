@@ -31,8 +31,8 @@ export function runBrowse(client: Client): Promise<number> {
     };
 
     const term: Terminal = {
-      cols: () => stdout.columns ?? 80,
-      rows: () => stdout.rows ?? 24,
+      cols: () => stdout.columns || 80,
+      rows: () => stdout.rows || 24,
       paint(frame) {
         if (!live) return;
         // Each row ends by clearing to the end of its line rather than the

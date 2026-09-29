@@ -5,13 +5,19 @@ read articles, save links, search your library, and look through your
 highlights.
 
 ```
- Quick Reads  Queue  To Do  Archive                        23 articles
- 
-  Native app propaganda is working          Birchtree · 6 min · 2h
-  A deep dive into HDR screenshots   Six Colors · 12 min · 40% · 5h
-  Nintendo announces a thing               The Verge · 4 min · 1d
+ Quick Reads    Queue  To Do  Archive                           23 articles
 
- ↑/↓ move · ↵ read · a archive · / search · s save · ? keys · q quit
+   Today ──────────────────────────────────────────────────────────────────
+ ▍ Native app propaganda is working                          ━━━───     2h
+   Birchtree · 6 min  People keep saying web apps are fine, and…     #Tech
+   A deep dive into HDR screenshots                                     5h
+   Six Colors · 12 min  What your Mac does when you press…
+
+   Yesterday ──────────────────────────────────────────────────────────────
+   Nintendo announces a thing                                           1d
+   The Verge · 4 min
+
+ ↑↓ move   ↵ read   a archive   / search   s save   ? keys   q quit
 ```
 
 It talks to the [public Quick Reads API](https://quickreads.app/docs), so you
@@ -67,6 +73,7 @@ Run `quickreads` with no arguments.
 | `Tab` or `1` `2` `3` | Switch between Queue, To Do, and Archive |
 | `o` | Open the original page in your browser |
 | `c` | Copy the link, or the highlight |
+| `v` | Switch between roomy rows and compact ones |
 | `r` | Refresh |
 | `?` | Show every key |
 | `Esc` | Go back |
@@ -74,6 +81,28 @@ Run `quickreads` with no arguments.
 
 Archiving happens on screen right away and `u` takes it back, so a stray `a`
 costs one keypress.
+
+Roomy rows take two lines each and show the start of the article, its tags, and
+how far you have read. Compact rows take one line, so twice as many fit.
+`quickreads` remembers which one you chose.
+
+The mouse wheel scrolls the list and the article. The mouse still belongs to
+your terminal, so you can select text and copy it as usual.
+
+An article you started elsewhere opens where you stopped. `g` goes back to the
+top. In a terminal that supports it, links in the article open when you click
+them.
+
+### Colours
+
+`quickreads` asks your terminal for its background colour when it starts, and
+picks inks that read well on it. The selected row gets a purple tint mixed from
+that background. A terminal that does not answer within a quarter of a second
+gets the dark inks and a selection in reverse video.
+
+Set `QUICKREADS_THEME` to `dark` or `light` to skip the question. Set
+`NO_COLOR` to turn colour off. Nothing on screen depends on colour alone. A bar
+at the left edge marks the selected row, and the current list is in brackets.
 
 ## Commands
 
@@ -139,13 +168,17 @@ Hints and colour appear only when the output is a terminal. In a pipe, an empty
 result prints nothing with `--json` or `--plain`. `NO_COLOR` turns colour off
 everywhere.
 
+A command that waits on the server for more than 150 milliseconds shows a
+spinner. It draws on stderr and only in a terminal, so it never ends up in a
+pipe or a file.
+
 ## Reading
 
 Articles wrap to 80 columns at most. Long ones open in your pager, which is
 `$QUICKREADS_PAGER`, then `$PAGER`, then `less`. `--no-pager` prints instead.
 
 Links are underlined and numbered, with the addresses listed at the end of the
-article. Passages you highlighted in Quick Reads are marked in yellow. Images
+article. Printed straight to a terminal they are also clickable. Passages you highlighted in Quick Reads are marked in yellow. Images
 appear as their alt text.
 
 Some saves have no article text. A To Do item is a link by design, and some
