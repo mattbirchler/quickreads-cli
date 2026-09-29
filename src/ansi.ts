@@ -7,9 +7,12 @@ export const useColor = (): boolean =>
 // Primary ink is the terminal's own default foreground so the reader's theme
 // stays in charge. Hierarchy comes from weight and two quieter inks; the one
 // accent is Quick Reads purple, and the remaining colours each mean something
-// (done, warning, error, a highlighted passage). Truecolor where the terminal
-// speaks it, the nearest xterm-256 index where it does not.
+// (done, warning, error, a highlighted passage, a tag's own colour).
+// Truecolor where the terminal speaks it, the nearest xterm-256 index where
+// it does not.
 type Depth = 'truecolor' | '256' | 'basic';
+
+export type Rgb = [number, number, number];
 
 function colorDepth(): Depth {
   const ct = process.env['COLORTERM'] ?? '';
@@ -18,8 +21,37 @@ function colorDepth(): Depth {
   return 'basic';
 }
 
+// What is behind the text. Null until the terminal has been asked (see
+// tui/probe.ts), and for every command that never asks. Everything that
+// depends on it has a fallback that needs no answer.
+let background: Rgb | null = null;
+
+export function setBackground(rgb: Rgb | null): void {
+  background = rgb;
+}
+
+export const getBackground = (): Rgb | null => background;
+
+const luminance = ([r, g, b]: Rgb): number => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+
+/** Dark unless the terminal said otherwise: most are, and the dark inks are the gentler mistake. */
+export const isDark = (): boolean => background === null || luminance(background) < 0.5;
+
+/** Whether a background tint can be mixed from the terminal's own colour. */
+export const canTint = (): boolean =>
+  useColor() && colorDepth() === 'truecolor' && background !== null;
+
+const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
+  Math.round(a[0] + (b[0] - a[0]) * t),
+  Math.round(a[1] + (b[1] - a[1]) * t),
+  Math.round(a[2] + (b[2] - a[2]) * t),
+];
+
 interface Ink {
-  rgb: [number, number, number];
+  // For dark backgrounds, and for light ones when `light` is absent.
+  rgb: Rgb;
+  // The same colour with enough weight to read on a light background.
+  light?: Rgb;
   xterm: number;
   // What to fall back to when the terminal has only the basic eight.
   basic: string | null;
@@ -29,7 +61,7 @@ const fg = (ink: Ink) => (s: string): string => {
   if (!useColor() || s === '') return s;
   const depth = colorDepth();
   if (depth === 'truecolor') {
-    const [r, g, b] = ink.rgb;
+    const [r, g, b] = !isDark() && ink.light !== undefined ? ink.light : ink.rgb;
     return `\x1b[38;2;${r};${g};${b}m${s}\x1b[39m`;
   }
   if (depth === '256') return `\x1b[38;5;${ink.xterm}m${s}\x1b[39m`;
@@ -46,13 +78,58 @@ export const underline = wrap('4', '24');
 export const reverse = wrap('7', '27');
 
 // Mid grays chosen to read on light and dark terminal themes alike.
-export const ink2 = fg({ rgb: [159, 162, 171], xterm: 247, basic: null });
-export const ink3 = fg({ rgb: [110, 113, 122], xterm: 243, basic: null });
+export const ink2 = fg({ rgb: [159, 162, 171], light: [92, 96, 105], xterm: 247, basic: null });
+export const ink3 = fg({ rgb: [110, 113, 122], light: [138, 141, 150], xterm: 243, basic: null });
 
-export const accent = fg({ rgb: [167, 139, 250], xterm: 141, basic: '35' });
-export const ok = fg({ rgb: [91, 208, 126], xterm: 78, basic: '32' });
-export const warn = fg({ rgb: [224, 165, 66], xterm: 214, basic: '33' });
-export const err = fg({ rgb: [255, 122, 114], xterm: 210, basic: '31' });
+const ACCENT: Ink = { rgb: [167, 139, 250], light: [124, 58, 237], xterm: 141, basic: '35' };
+export const accent = fg(ACCENT);
+export const ok = fg({ rgb: [91, 208, 126], light: [22, 140, 70], xterm: 78, basic: '32' });
+export const warn = fg({ rgb: [224, 165, 66], light: [180, 110, 10], xterm: 214, basic: '33' });
+export const err = fg({ rgb: [255, 122, 114], light: [210, 50, 45], xterm: 210, basic: '31' });
+
+// The tag palette Quick Reads assigns from. A colour this list has never
+// heard of falls back to the quiet ink rather than guessing.
+const TAG_INKS: Record<string, Ink> = {
+  blue: { rgb: [96, 165, 250], light: [37, 99, 235], xterm: 75, basic: '34' },
+  purple: { rgb: [167, 139, 250], light: [124, 58, 237], xterm: 141, basic: '35' },
+  orange: { rgb: [251, 146, 60], light: [214, 88, 12], xterm: 208, basic: '33' },
+  green: { rgb: [74, 222, 128], light: [22, 140, 70], xterm: 78, basic: '32' },
+  yellow: { rgb: [250, 204, 21], light: [170, 120, 4], xterm: 220, basic: '33' },
+  red: { rgb: [248, 113, 113], light: [210, 50, 45], xterm: 210, basic: '31' },
+  gray: { rgb: [156, 163, 175], light: [107, 114, 128], xterm: 247, basic: null },
+};
+
+export function tagInk(color: string, s: string): string {
+  const ink = TAG_INKS[color];
+  return ink === undefined ? ink2(s) : fg(ink)(s);
+}
+
+const bg = (rgb: Rgb, s: string): string =>
+  (s === '' ? s : `\x1b[48;2;${rgb[0]};${rgb[1]};${rgb[2]}m${s}\x1b[49m`);
+
+/**
+ * The selected row. A wash of the accent over the terminal's own background
+ * when that is known, which keeps every ink on the row legible; plain reverse
+ * video when it is not, which works on any terminal ever made.
+ *
+ * The text may carry its own colours. They all reset the foreground only, so
+ * the wash survives them.
+ */
+export function selected(s: string): string {
+  if (!canTint()) return reverse(s);
+  const accentRgb = isDark() ? ACCENT.rgb : ACCENT.light!;
+  return bg(mix(background!, accentRgb, isDark() ? 0.24 : 0.14), s);
+}
+
+/**
+ * A raised surface (a code block, the help panel): the background nudged
+ * toward the ink. Without a known background there is no surface, and the
+ * caller's own ink has to carry the distinction.
+ */
+export function surface(s: string): string {
+  if (!canTint()) return s;
+  return bg(mix(background!, isDark() ? [255, 255, 255] : [0, 0, 0], isDark() ? 0.07 : 0.05), s);
+}
 
 /**
  * A highlighted passage: dark ink on highlighter yellow, which reads the same
@@ -61,8 +138,17 @@ export const err = fg({ rgb: [255, 122, 114], xterm: 210, basic: '31' });
 export function mark(s: string): string {
   if (!useColor() || s === '') return s;
   const depth = colorDepth();
-  const bg = depth === 'truecolor' ? '48;2;250;220;110' : depth === '256' ? '48;5;221' : '43';
-  return `\x1b[30;${bg}m${s}\x1b[39;49m`;
+  const back = depth === 'truecolor' ? '48;2;250;220;110' : depth === '256' ? '48;5;221' : '43';
+  return `\x1b[30;${back}m${s}\x1b[39;49m`;
+}
+
+/** Text that opens `url` when clicked, in terminals that do that. The rest show the text. */
+export function hyperlink(url: string, s: string): string {
+  if (!useColor() || s === '') return s;
+  // Control characters in the address would end the sequence early.
+  // eslint-disable-next-line no-control-regex
+  const safe = url.replace(/[\x00-\x1f\x7f]/g, '');
+  return `\x1b]8;;${safe}\x07${s}\x1b]8;;\x07`;
 }
 
 export const ALT_SCREEN_ON = '\x1b[?1049h\x1b[?25l';
@@ -73,6 +159,15 @@ export const HOME = '\x1b[H';
 // repaint never shows a blank frame.
 export const CLEAR_LINE = '\x1b[K';
 export const CLEAR_BELOW = '\x1b[J';
+// Synchronized output: the terminal holds the frame until it is complete, so
+// a repaint lands whole instead of being seen halfway drawn.
+export const SYNC_ON = '\x1b[?2026h';
+export const SYNC_OFF = '\x1b[?2026l';
+// Alternate scroll: on the alternate screen the wheel sends arrow keys. It
+// scrolls the list and the article without taking the mouse away from the
+// terminal, so selecting text to copy still works.
+export const WHEEL_ON = '\x1b[?1007h';
+export const WHEEL_OFF = '\x1b[?1007l';
 
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g;

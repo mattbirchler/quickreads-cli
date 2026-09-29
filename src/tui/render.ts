@@ -2,7 +2,7 @@
 // without a terminal. Every frame is exactly `rows` lines tall and no line is
 // wider than `cols`.
 import type { Article, Highlight } from '../types.ts';
-import { accent, bold, err, ink2, ink3, padEnd, reverse, stringWidth, truncate, useColor, warn } from '../ansi.ts';
+import { accent, bold, err, ink2, ink3, padEnd, reverse, selected, stringWidth, truncate, useColor, warn } from '../ansi.ts';
 import { compactTime, count, rowMeta, titleOf } from '../format.ts';
 import { wrapText, MAX_READING_WIDTH } from '../layout.ts';
 import { TABS, TAB_LABEL, type HighlightsView, type ListView, type ReaderView, type State } from './state.ts';
@@ -66,7 +66,7 @@ function listHeader(state: State, cols: number): string {
   return header(` Quick Reads  ${tabsPlain}`, `${bold(accent(' Quick Reads'))}  ${tabs}`, rightPlain, right, cols);
 }
 
-export function listRow(article: Article, selected: boolean, now: Date, cols: number, flagArchived: boolean): string {
+export function listRow(article: Article, isSelected: boolean, now: Date, cols: number, flagArchived: boolean): string {
   const title = titleOf(article);
   const state = flagArchived && article.archivedAt !== null ? 'archived · ' : '';
   const meta = state + rowMeta(article, now);
@@ -87,7 +87,7 @@ export function listRow(article: Article, selected: boolean, now: Date, cols: nu
       spaces = inner - stringWidth(titleCut);
     }
   }
-  if (selected) return reverse(padEnd(`  ${titleCut}${' '.repeat(Math.max(0, spaces))}${metaShown}  `, cols));
+  if (isSelected) return selected(padEnd(`  ${titleCut}${' '.repeat(Math.max(0, spaces))}${metaShown}  `, cols));
   return `  ${bold(titleCut)}${' '.repeat(Math.max(0, spaces))}${ink3(metaShown)}  `;
 }
 
