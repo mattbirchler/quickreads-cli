@@ -7,6 +7,7 @@ import {
   ALT_SCREEN_ON, ALT_SCREEN_OFF, HOME, CLEAR_LINE, CLEAR_BELOW, SYNC_ON, SYNC_OFF, WHEEL_ON, WHEEL_OFF, setBackground,
 } from './ansi.ts';
 import { probeBackground } from './tui/probe.ts';
+import { loadPreferences, savePreferences } from './preferences.ts';
 import { openUrl, copyToClipboard } from './platform.ts';
 
 // Auto-wrap off while the browser owns the screen: a line that came out one
@@ -41,13 +42,14 @@ export function runBrowse(client: Client): Promise<number> {
       open: openUrl,
       copy: copyToClipboard,
       now: () => new Date(),
+      remember: (view) => savePreferences({ ...loadPreferences(), view }),
       quit(code) {
         teardown();
         resolve(code);
       },
     };
 
-    const app = createApp(client, term);
+    const app = createApp(client, term, { view: loadPreferences().view });
     const onKey = (chunk: Buffer): void => app.input(chunk.toString('utf8'));
     const onResize = (): void => app.resize();
     const onSignal = (): void => term.quit(0);
