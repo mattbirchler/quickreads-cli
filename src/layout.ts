@@ -158,7 +158,17 @@ function baseFor(block: Block): (s: string) => string {
   return plain;
 }
 
-function layoutBlock(block: Block, width: number): string[] {
+// The highlighted text on one line of output. The interactive reader uses
+// these to open an article at the passage that was picked.
+export interface Mark {
+  line: number;
+  text: string;
+}
+
+const markedText = (pieces: Piece[]): string =>
+  pieces.filter((p) => p.style.mark && !p.style.note).map((p) => p.text).join('');
+
+function layoutBlock(block: Block, width: number, marks: Mark[] = [], offset = 0): string[] {
   const bar = ink3('│') + ' ';
   const quoteCols = block.quote * 2;
   // Indentation yields before the text does.
@@ -185,8 +195,11 @@ function layoutBlock(block: Block, width: number): string[] {
   const base = baseFor(block);
   const first = block.bullet === '' ? ' '.repeat(hang) : ink3(block.bullet.padEnd(Math.max(0, hang - 1))) + (hang > 0 ? ' ' : '');
   const rest = ' '.repeat(hang);
-  return wrapUnits(unitsOf(block.spans), textWidth)
-    .map((pieces, i) => `${lead}${i === 0 ? first : rest}${paintLine(pieces, base)}`.trimEnd());
+  return wrapUnits(unitsOf(block.spans), textWidth).map((pieces, i) => {
+    const text = markedText(pieces);
+    if (text.trim() !== '') marks.push({ line: offset + i, text });
+    return `${lead}${i === 0 ? first : rest}${paintLine(pieces, base)}`.trimEnd();
+  });
 }
 
 // List items sit together; everything else gets air.
@@ -194,7 +207,7 @@ const tight = (a: Block, b: Block): boolean =>
   (a.hang > 0 || a.indent > 0) && (b.hang > 0 || b.indent > 0) && a.quote === b.quote && b.kind !== 'heading';
 
 /** The document as lines wrapped to `width`, with a Links section when it has any. */
-export function layoutDocument(doc: Document, width: number): string[] {
+export function layoutDocument(doc: Document, width: number, marks: Mark[] = []): string[] {
   const out: string[] = [];
   let previous: Block | null = null;
   for (const block of doc.blocks) {
@@ -203,7 +216,7 @@ export function layoutDocument(doc: Document, width: number): string[] {
       const shared = Math.min(previous.quote, block.quote);
       out.push(shared > 0 ? (ink3('│') + ' ').repeat(shared).trimEnd() : '');
     }
-    out.push(...layoutBlock(block, width));
+    out.push(...layoutBlock(block, width, marks, out.length));
     previous = block;
   }
 
@@ -273,6 +286,20 @@ export interface RenderedArticle {
   links: string[];
   // Highlights that were found in the text, out of those passed in.
   marked: number;
+  // Every line carrying highlighted text, top to bottom.
+  marks: Mark[];
+}
+
+/**
+ * The line a highlight starts on, or null when it is not in the text. The
+ * first line of a highlight is the one whose marked text the highlight begins
+ * with.
+ */
+export function lineOfHighlight(marks: Mark[], highlight: string): number | null {
+  const wanted = highlight.replace(/\s+/g, ' ').trim();
+  if (wanted === '') return null;
+  const found = marks.find((m) => m.text.trim() !== '' && wanted.startsWith(m.text.trim()));
+  return found?.line ?? null;
 }
 
 /** A whole article, header to links, as lines no wider than `options.width`. */
@@ -285,10 +312,13 @@ export function renderArticle(article: Article, options: ReaderOptions): Rendere
   if (doc.blocks.length === 0) {
     const message = [whyEmpty(article), options.emptyHint ?? ''].filter((s) => s !== '').join(' ');
     lines.push(...wrapText(message, width).map((l) => ink2(l)));
-    return { lines, links: [], marked: 0 };
+    return { lines, links: [], marked: 0, marks: [] };
   }
 
   const marked = markHighlights(doc, (options.highlights ?? []).map((h) => h.text));
-  lines.push(...layoutDocument(doc, width));
-  return { lines, links: doc.links, marked };
+  const marks: Mark[] = [];
+  const body = layoutDocument(doc, width, marks);
+  const top = lines.length;
+  lines.push(...body);
+  return { lines, links: doc.links, marked, marks: marks.map((m) => ({ ...m, line: m.line + top })) };
 }

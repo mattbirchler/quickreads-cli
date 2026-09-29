@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { DEFAULT_SERVER, loadConfig, getToken, storeToken, forgetToken, normalizeServerUrl, configPath } from './config.ts';
 import { createClient, verifyToken, ApiError } from './api.ts';
+import { explain } from './explain.ts';
 
 const HELP = `quickreads: Quick Reads in your terminal
 
@@ -256,7 +257,9 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     default: {
       const { COMMANDS } = await import('./commands.ts');
-      // Until there is a terminal to draw on, the bare command is the list.
+      // The browser needs a terminal on both ends. In a pipe the bare command
+      // is the list, which is what `quickreads | head` was asking for.
+      const interactive = command === 'browse' && process.stdout.isTTY === true && process.stdin.isTTY === true;
       const run = COMMANDS[command === 'browse' ? 'list' : command];
       if (run === undefined) {
         process.stderr.write(`Unknown command: ${command}\nRun \`quickreads help\` for usage.\n`);
@@ -266,6 +269,10 @@ export async function main(argv: string[]): Promise<number> {
       if (connection === null) return 1;
       const { terminalIo } = await import('./io.ts');
       try {
+        if (interactive) {
+          const { runBrowse } = await import('./browse.ts');
+          return await runBrowse(createClient(connection.serverUrl, connection.token));
+        }
         return await run({
           client: createClient(connection.serverUrl, connection.token),
           io: terminalIo(),
@@ -278,17 +285,4 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
   }
-}
-
-/** An error as a sentence, with the way out when there is one. */
-export function explain(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.kind === 'unauthorized') return 'The server rejected this API key. Run `quickreads auth` to connect again.';
-    if (err.kind === 'not_found') {
-      return `${err.message.replace(/\.$/, '')}. Row numbers come from the last listing, so run \`quickreads list\` to refresh them.`;
-    }
-    if (err.kind === 'rate_limited') return 'Quick Reads is asking for a breather. Wait a moment and try again.';
-    return err.message;
-  }
-  return err instanceof Error ? err.message : String(err);
 }

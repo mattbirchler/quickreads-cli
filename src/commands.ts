@@ -166,7 +166,7 @@ export async function read(ctx: CommandContext): Promise<number> {
   return 0;
 }
 
-function normalizeUrl(input: string): string | null {
+export function normalizeUrl(input: string): string | null {
   const trimmed = input.trim();
   if (trimmed === '') return null;
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
