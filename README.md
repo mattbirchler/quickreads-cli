@@ -52,7 +52,8 @@ Run `quickreads` with no arguments.
 | `g` `G` | Jump to the top, the bottom |
 | `Enter` | Read the selected article |
 | `a` | Archive. In the archive, send it back to the queue |
-| `u` | Undo the last archive |
+| `m` | Highlight a passage in the article you are reading |
+| `u` | Undo the last archive or highlight |
 | `s` | Save a link to the list you are looking at |
 | `/` | Search everything you have saved |
 | `h` | Your highlights. Enter opens the article at that passage |
@@ -72,6 +73,28 @@ Enter opens the article. Passages you highlighted in Quick Reads are marked in
 yellow.
 
 ![An article open in the reader, with two highlighted passages, a quote, and a code block](docs/screenshots/reader.png)
+
+### Highlighting
+
+Press `m` while reading. The first sentence on screen is selected. Move the
+selection to the passage you want, adjust where it starts and ends, and press
+Enter.
+
+![A passage selected in purple in the reader, above two passages already highlighted in yellow](docs/screenshots/marking.png)
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` or `k` `j` | Select the previous sentence, the next one |
+| `→` `←` or `l` `h` | Move the end one word later, one word earlier |
+| `J` `K` or Shift with `↓` `↑` | Take in the next sentence, let the last one go |
+| `L` `H` or Shift with `→` `←` | Move the start one word later, one word earlier |
+| `Enter` | Save the highlight |
+| `n` | Write a note, then save the highlight with it |
+| `Esc` | Cancel |
+
+The highlight is saved to Quick Reads, so it appears in the web reader and the
+apps too. `u` removes the one you just made. A highlight stays inside one
+paragraph, and code blocks and headings cannot be highlighted.
 
 `h` lists your highlights, newest first, with your notes under them.
 
@@ -128,6 +151,9 @@ quickreads search hdr --tag tech    # both
 
 quickreads highlights               # newest first, across every article
 quickreads highlights 3             # the highlights in one article
+quickreads highlight 3 "the words to keep"
+quickreads highlight 3 "the words to keep" --note "Why they matter"
+pbpaste | quickreads highlight 3    # highlight what is on the clipboard
 
 quickreads archive 1 2 3
 quickreads unarchive 1
@@ -145,6 +171,14 @@ listing. It also accepts an article id or a link to the article in Quick Reads.
 `archive 1 2 3` checks all three numbers before it changes anything. A typo
 stops the command instead of archiving two articles out of three.
 
+### Highlighting from a script
+
+`highlight` takes an article and a passage. The passage has to be in the
+article, because a highlight is a quotation. Case and the style of quote marks
+can differ from the article, and the highlight saves the article's own wording.
+A passage that is not there is refused before anything is sent. Highlighting
+the same passage twice makes one highlight.
+
 ### Output for scripts
 
 `--json` prints one JSON object per line, exactly as the API returned it.
@@ -154,6 +188,7 @@ stops the command instead of archiving two articles out of three.
 |---------|-------------------|
 | `list`, `search` | id, saved at, site, title, URL |
 | `highlights` | article id, created at, text, note |
+| `highlight` | id, article id, text, note |
 | `save` | id, title, URL |
 | `tags` | id, name, article count |
 
