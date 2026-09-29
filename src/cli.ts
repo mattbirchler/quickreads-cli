@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { DEFAULT_SERVER, loadConfig, getToken, storeToken, forgetToken, normalizeServerUrl, configPath } from './config.ts';
-import { verifyToken, ApiError } from './api.ts';
+import { createClient, verifyToken, ApiError } from './api.ts';
 
 const HELP = `quickreads: Quick Reads in your terminal
 
@@ -15,6 +15,7 @@ Usage:
   quickreads unarchive <article>     Return an article to the queue
   quickreads open <article>          Open an article in your browser
   quickreads tags                    List your tags
+  quickreads whoami                  Show the connected account
   quickreads auth                    Connect an account with an API key
   quickreads logout                  Forget the stored API key
   quickreads help                    Show this help
@@ -231,7 +232,7 @@ export function connect(flags: Flags): Connection | null {
 }
 
 export async function main(argv: string[]): Promise<number> {
-  const { command, flags, error } = parseArgs(argv);
+  const { command, args, flags, error } = parseArgs(argv);
   if (error !== null) {
     process.stderr.write(`${error}\nRun \`quickreads help\` for usage.\n`);
     return 2;
@@ -253,8 +254,41 @@ export async function main(argv: string[]): Promise<number> {
       forgetToken();
       process.stderr.write('Signed out. The API key is gone from this machine; revoke it in Quick Reads Settings to retire it everywhere.\n');
       return 0;
-    default:
-      process.stderr.write(`Unknown command: ${command}\nRun \`quickreads help\` for usage.\n`);
-      return 2;
+    default: {
+      const { COMMANDS } = await import('./commands.ts');
+      // Until there is a terminal to draw on, the bare command is the list.
+      const run = COMMANDS[command === 'browse' ? 'list' : command];
+      if (run === undefined) {
+        process.stderr.write(`Unknown command: ${command}\nRun \`quickreads help\` for usage.\n`);
+        return 2;
+      }
+      const connection = connect(flags);
+      if (connection === null) return 1;
+      const { terminalIo } = await import('./io.ts');
+      try {
+        return await run({
+          client: createClient(connection.serverUrl, connection.token),
+          io: terminalIo(),
+          flags,
+          args,
+        });
+      } catch (err) {
+        process.stderr.write(`${explain(err)}\n`);
+        return 1;
+      }
+    }
   }
+}
+
+/** An error as a sentence, with the way out when there is one. */
+export function explain(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.kind === 'unauthorized') return 'The server rejected this API key. Run `quickreads auth` to connect again.';
+    if (err.kind === 'not_found') {
+      return `${err.message.replace(/\.$/, '')}. Row numbers come from the last listing, so run \`quickreads list\` to refresh them.`;
+    }
+    if (err.kind === 'rate_limited') return 'Quick Reads is asking for a breather. Wait a moment and try again.';
+    return err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
 }
