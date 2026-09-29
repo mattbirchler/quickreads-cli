@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs } from '../src/cli.ts';
+import { parseArgs, hasAccess } from '../src/cli.ts';
 
 test('bare invocation is the interactive browser', () => {
   const { command, args, error } = parseArgs([]);
@@ -70,4 +70,16 @@ test('--json and --plain are one or the other', () => {
 
 test('unknown options are refused', () => {
   assert.notEqual(parseArgs(['--nope']).error, null);
+});
+
+test('access follows the subscription status, then the tier', () => {
+  const account = { id: 'u', email: 'r@example.test', tier: 'pro' };
+  const sub = (status: string) => ({ status, currentPeriodEnd: null, cancelAtPeriodEnd: false });
+  assert.equal(hasAccess(account), true);
+  assert.equal(hasAccess({ ...account, tier: 'free' }), false);
+  assert.equal(hasAccess({ ...account, tier: 'free', subscription: sub('none') }), false);
+  assert.equal(hasAccess({ ...account, tier: 'basic', subscription: sub('canceled') }), false);
+  assert.equal(hasAccess({ ...account, tier: 'basic', subscription: sub('trialing') }), true);
+  // A live subscription the server has not mapped to a tier yet still works.
+  assert.equal(hasAccess({ ...account, tier: 'free', subscription: sub('active') }), true);
 });

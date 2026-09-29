@@ -2,7 +2,7 @@
 // out, a repaint after each. It talks to a Terminal interface rather than to
 // process.stdout, so the tests drive it key by key against a fake account and
 // read the frames it paints.
-import { ApiError, PAGE_SIZE, cursorAfter, type Client } from '../api.ts';
+import { ApiError, PAGE_SIZE, cursorAfter, loadForReading, type Client } from '../api.ts';
 import type { Article, Highlight } from '../types.ts';
 import { titleOf } from '../format.ts';
 import { articleHeader, lineOfHighlight, renderArticle } from '../layout.ts';
@@ -256,10 +256,7 @@ export function createApp(client: Client, term: Terminal): App {
 
     track((async () => {
       try {
-        const [full, highlights] = await Promise.all([
-          client.article(article.id),
-          client.articleHighlights(article.id).catch((): Highlight[] => []),
-        ]);
+        const { article: full, highlights } = await loadForReading(client, article.id);
         if (ticket !== readerTicket || state.reader === null) return;
         state.reader.article = full;
         state.reader.highlights = highlights;

@@ -3,7 +3,7 @@
 // process.stdout or the filesystem directly, which is what lets the tests run
 // a command against a fake server and read back exactly what it printed.
 import type { Flags } from './cli.ts';
-import { walkArticles, type Client } from './api.ts';
+import { loadForReading, walkArticles, type Client } from './api.ts';
 import type { Article, Highlight } from './types.ts';
 import type { Ref, RefStore } from './refs.ts';
 import { resolveRef } from './refs.ts';
@@ -139,12 +139,7 @@ export async function read(ctx: CommandContext): Promise<number> {
   const ref = articleFrom(ctx, args[0]);
   if (ref === null) return 2;
 
-  const [article, highlights] = await Promise.all([
-    client.article(ref.id),
-    // Highlights decorate the article; failing to load them must not cost
-    // the reader the article itself.
-    client.articleHighlights(ref.id).catch((): Highlight[] => []),
-  ]);
+  const { article, highlights } = await loadForReading(client, ref.id);
 
   if (flags.json) {
     io.out(JSON.stringify(article));

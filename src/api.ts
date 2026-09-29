@@ -132,6 +132,7 @@ export interface Client {
   unarchive(id: string): Promise<void>;
   highlights(params?: { limit?: number; offset?: number }): Promise<HighlightsPage>;
   articleHighlights(id: string): Promise<Highlight[]>;
+  articleTags(id: string): Promise<Tag[]>;
   tags(): Promise<Tag[]>;
   /** Where this article lives in the Quick Reads web app. */
   readerUrl(id: string): string;
@@ -209,6 +210,7 @@ export function createClient(serverUrl: string, token: string, fetchImpl: typeof
       return request<HighlightsPage>('GET', `/api/highlights?${q.toString()}`);
     },
     articleHighlights: (id) => request<Highlight[]>('GET', `${at(id)}/highlights`),
+    articleTags: (id) => request<Tag[]>('GET', `${at(id)}/tags`),
 
     tags: () => request<Tag[]>('GET', '/api/tags'),
 
@@ -240,4 +242,18 @@ export async function walkArticles(client: Client, params: ListParams, limit: nu
     before = next;
   }
   return out;
+}
+
+/**
+ * Everything the reader shows for one article. A single article comes back
+ * without its tags and highlights, so they are asked for alongside it; both
+ * are decoration, and losing either must not cost the reader the article.
+ */
+export async function loadForReading(client: Client, id: string): Promise<{ article: Article; highlights: Highlight[] }> {
+  const [article, highlights, tags] = await Promise.all([
+    client.article(id),
+    client.articleHighlights(id).catch((): Highlight[] => []),
+    client.articleTags(id).catch((): Tag[] | null => null),
+  ]);
+  return { article: tags === null || article.tags !== undefined ? article : { ...article, tags }, highlights };
 }

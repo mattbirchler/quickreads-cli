@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { DEFAULT_SERVER, loadConfig, getToken, storeToken, forgetToken, normalizeServerUrl, configPath } from './config.ts';
 import { createClient, verifyToken, ApiError } from './api.ts';
 import { explain } from './explain.ts';
+import type { Account } from './types.ts';
 
 const HELP = `quickreads: Quick Reads in your terminal
 
@@ -184,10 +185,9 @@ async function runAuth(flags: Flags): Promise<number> {
     return 1;
   }
 
-  let email: string;
-  let tier: string;
+  let account: Account;
   try {
-    ({ email, tier } = await verifyToken(serverUrl, token));
+    account = await verifyToken(serverUrl, token);
   } catch (err) {
     if (err instanceof ApiError && err.kind === 'unauthorized') {
       process.stderr.write('That key was rejected. Check it in Quick Reads Settings and try again.\n');
@@ -199,7 +199,7 @@ async function runAuth(flags: Flags): Promise<number> {
 
   const config = { ...(existing ?? {}), serverUrl };
   const where = storeToken(config, token);
-  process.stderr.write(`Connected as ${email}.\n`);
+  process.stderr.write(`Connected as ${account.email}.\n`);
   process.stderr.write(
     where === 'keychain'
       ? 'Key stored in the macOS Keychain.\n'
@@ -207,10 +207,21 @@ async function runAuth(flags: Flags): Promise<number> {
   );
   // The API answers /api/me for an account with no subscription, but nothing
   // else will work for it; better to hear that now than on the first list.
-  if (tier === 'free') {
+  if (!hasAccess(account)) {
     process.stderr.write('This account has no active subscription, so the queue will not load until it does.\n');
   }
   return 0;
+}
+
+/**
+ * Whether the rest of the API will answer for this account. The subscription
+ * status is the better witness when it is there: a tier of "free" alongside a
+ * live subscription is an account mid-change, not one that is locked out.
+ */
+export function hasAccess(account: Account): boolean {
+  const status = account.subscription?.status;
+  if (status !== undefined) return ['active', 'trialing', 'past_due'].includes(status);
+  return account.tier !== 'free';
 }
 
 export interface Connection {

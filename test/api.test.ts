@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClient, walkArticles, verifyToken, ApiError } from '../src/api.ts';
+import { createClient, walkArticles, loadForReading, verifyToken, ApiError } from '../src/api.ts';
 import type { Article } from '../src/types.ts';
 
 interface Seen { url: string; method: string; headers: Record<string, string>; body: unknown }
@@ -166,4 +166,28 @@ test('a dead connection is a network error, not a crash', async () => {
 
 test('reader links point into the web app', () => {
   assert.equal(createClient(SERVER, 'rl_x').readerUrl('abc'), `${SERVER}/app/read/abc`);
+});
+
+test('loadForReading gathers the article, its tags and its highlights', async () => {
+  const client = createClient(SERVER, 'rl_x', fetchStub((s) => {
+    const path = new URL(s.url).pathname;
+    if (path.endsWith('/tags')) return Response.json([{ id: 't', name: 'Tech', color: 'blue' }]);
+    if (path.endsWith('/highlights')) return Response.json([{ id: 'h', articleId: 'abc', text: 'a passage', createdAt: '' }]);
+    return Response.json(article('abc'));
+  }));
+  const { article: got, highlights } = await loadForReading(client, 'abc');
+  assert.deepEqual(got.tags, [{ id: 't', name: 'Tech', color: 'blue' }]);
+  assert.equal(highlights.length, 1);
+});
+
+test('loadForReading still has the article when the extras fail', async () => {
+  const client = createClient(SERVER, 'rl_x', fetchStub((s) => {
+    const path = new URL(s.url).pathname;
+    if (path.endsWith('/tags') || path.endsWith('/highlights')) return Response.json({ error: 'nope' }, { status: 500 });
+    return Response.json(article('abc'));
+  }));
+  const { article: got, highlights } = await loadForReading(client, 'abc');
+  assert.equal(got.id, 'abc');
+  assert.equal(got.tags, undefined);
+  assert.deepEqual(highlights, []);
 });

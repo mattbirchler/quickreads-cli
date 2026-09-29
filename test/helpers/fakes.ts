@@ -140,6 +140,11 @@ export function fakeClient(seed: Partial<FakeAccount> = {}): FakeClient {
       called('articleHighlights', id);
       return account.highlights.filter((h) => h.articleId === id);
     },
+    async articleTags(id) {
+      called('articleTags', id);
+      const ids = account.tagged[id] ?? [];
+      return account.tags.filter((t) => ids.includes(t.id)).map(({ articleCount: _, ...tag }) => tag);
+    },
     async tags() {
       called('tags');
       return account.tags;

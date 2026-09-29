@@ -160,6 +160,18 @@ test('read marks the passages that were highlighted, and survives losing them', 
   assert.equal(io2.stdout[0], 'Native app propaganda');
 });
 
+test('read shows the article\'s tags, and survives losing them', async () => {
+  const { io } = await run('read', ['a2']);
+  assert.ok(io.stdout.includes('#Tech'));
+  assert.ok(!(await run('read', ['a1'])).io.stdout.some((l) => l.startsWith('#')));
+
+  const broken = library();
+  broken.failNext.articleTags = new ApiError('server', 500, 'boom');
+  const lost = await run('read', ['a2'], {}, broken);
+  assert.equal(lost.code, 0);
+  assert.ok(lost.io.stdout.includes('Body of a2.'));
+});
+
 test('read --width wraps where it is told', async () => {
   const client = library();
   client.account.articles[0]!.content = `<p>${'word '.repeat(50)}</p>`;
