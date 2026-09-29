@@ -4,21 +4,7 @@
 read articles, save links, search your library, and look through your
 highlights.
 
-```
- Quick Reads    Queue  To Do  Archive                           23 articles
-
-   Today ──────────────────────────────────────────────────────────────────
- ▍ Native app propaganda is working                          ━━━───     2h
-   Birchtree · 6 min  People keep saying web apps are fine, and…     #Tech
-   A deep dive into HDR screenshots                                     5h
-   Six Colors · 12 min  What your Mac does when you press…
-
-   Yesterday ──────────────────────────────────────────────────────────────
-   Nintendo announces a thing                                           1d
-   The Verge · 4 min
-
- ↑↓ move   ↵ read   a archive   / search   s save   ? keys   q quit
-```
+![The queue in a terminal: articles on two lines each under Today, Yesterday and Past week, with the selected row tinted purple](docs/screenshots/queue.png)
 
 It talks to the [public Quick Reads API](https://quickreads.app/docs), so you
 need a Quick Reads account and an API key.
@@ -82,6 +68,15 @@ Run `quickreads` with no arguments.
 Archiving happens on screen right away and `u` takes it back, so a stray `a`
 costs one keypress.
 
+Enter opens the article. Passages you highlighted in Quick Reads are marked in
+yellow.
+
+![An article open in the reader, with two highlighted passages, a quote, and a code block](docs/screenshots/reader.png)
+
+`h` lists your highlights, newest first, with your notes under them.
+
+![The highlights screen, five passages each under the title of its article](docs/screenshots/highlights.png)
+
 Roomy rows take two lines each and show the start of the article, its tags, and
 how far you have read. Compact rows take one line, so twice as many fit.
 `quickreads` remembers which one you chose.
@@ -104,10 +99,14 @@ Set `QUICKREADS_THEME` to `dark` or `light` to skip the question. Set
 `NO_COLOR` to turn colour off. Nothing on screen depends on colour alone. A bar
 at the left edge marks the selected row, and the current list is in brackets.
 
+![The queue on a white terminal background, with darker inks and a pale purple selection](docs/screenshots/queue-light.png)
+
 ## Commands
 
 Every part of the browser is also a command, for scripts and for when you
 already know what you want.
+
+![A shell session running save, list, archive and tags](docs/screenshots/commands.png)
 
 ```sh
 quickreads list                     # the queue, newest first
