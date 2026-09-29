@@ -5,8 +5,8 @@ import { parseHtml } from '../src/html.ts';
 import { layoutDocument, renderArticle } from '../src/layout.ts';
 import type { Article } from '../src/types.ts';
 
-// The layout tests elsewhere run without colour. These stand up a truecolor
-// terminal to check what colour adds, and that it adds no width.
+// The layout tests elsewhere run without color. These stand up a truecolor
+// terminal to check what color adds, and that it adds no width.
 function atTerminal<T>(background: [number, number, number] | null, fn: () => T): T {
   const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
   const saved = { NO_COLOR: process.env['NO_COLOR'], COLORTERM: process.env['COLORTERM'] };
@@ -72,7 +72,7 @@ test('without a known background code is indented and quiet, with no panel', () 
   });
 });
 
-test('colour never changes where the lines break', () => {
+test('color never changes where the lines break', () => {
   const article: Article = {
     id: 'a', url: 'https://example.com/post', title: 'A Headline', author: null, siteName: 'Example',
     content: `${HTML}<p>${'word '.repeat(80)}</p><ul><li>One <code>item</code></li></ul>`, excerpt: null,
@@ -80,8 +80,33 @@ test('colour never changes where the lines break', () => {
     tags: [{ id: 't', name: 'Tech', color: 'blue' }],
   };
   const plain = renderArticle(article, { width: 50 }).lines;
-  const coloured = atTerminal(null, () => renderArticle(article, { width: 50, hyperlinks: true }).lines);
-  assert.deepEqual(coloured.map((l) => stripAnsi(l)), plain);
-  assert.ok(coloured.some((l) => l.includes('\x1b[')), 'and it was in colour');
-  assert.ok(coloured.every((l) => stringWidth(stripAnsi(l)) <= 50));
+  const colored = atTerminal(null, () => renderArticle(article, { width: 50, hyperlinks: true }).lines);
+  assert.deepEqual(colored.map((l) => stripAnsi(l)), plain);
+  assert.ok(colored.some((l) => l.includes('\x1b[')), 'and it was in color');
+  assert.ok(colored.every((l) => stringWidth(stripAnsi(l)) <= 50));
+});
+
+test('the passage being chosen is tinted, over an existing highlight too, and adds no width', () => {
+  const article = {
+    id: 'a', url: 'https://example.com/a', title: 'T', author: null, siteName: null, excerpt: null, wordCount: 10,
+    type: 'article', publishedAt: null, savedAt: '2026-09-01T00:00:00.000Z', archivedAt: null,
+    content: '<p>One sentence here. Another sentence there.</p>',
+  } as Article;
+  const highlights = [{ id: 'h', articleId: 'a', text: 'sentence here', createdAt: '' }];
+  atTerminal([30, 30, 46], () => {
+    const plain = renderArticle(article, { width: 40, highlights });
+    const picked = renderArticle(article, { width: 40, highlights, selection: { block: 0, from: 0, to: 18 } });
+    const line = picked.lines[picked.picks[0]!]!;
+    assert.deepEqual(picked.picks.length, 1);
+    assert.ok(/\x1b\[48;2;\d+;\d+;\d+mOne /.test(line), JSON.stringify(line));
+    // The highlight's yellow gives way inside the selection.
+    assert.ok(!line.includes('48;2;250;220;110'));
+    assert.ok(!stripAnsi(line).includes('['));
+    assert.equal(stripAnsi(line), stripAnsi(plain.lines[picked.picks[0]!]!));
+  });
+  // A terminal that cannot say its color gets reverse video.
+  atTerminal(null, () => {
+    const picked = renderArticle(article, { width: 40, selection: { block: 0, from: 0, to: 18 } });
+    assert.ok(picked.lines[picked.picks[0]!]!.includes('\x1b[7mOne sentence here.\x1b[27m'));
+  });
 });

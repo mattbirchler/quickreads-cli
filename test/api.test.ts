@@ -117,6 +117,32 @@ test('archive and unarchive post to the article', async () => {
   assert.deepEqual(seen, ['POST /api/articles/abc/archive', 'POST /api/articles/abc/unarchive']);
 });
 
+test('a highlight is posted with its article, and a note only when there is one', async () => {
+  const seen: Seen[] = [];
+  const client = createClient(SERVER, 'rl_x', fetchStub((s) => {
+    seen.push(s);
+    return Response.json({ id: 'h1', articleId: 'abc', text: 'a passage', note: null, createdAt: '' }, { status: 201 });
+  }));
+  const made = await client.highlight('abc', 'a passage');
+  await client.highlight('abc', 'a passage', '  worth keeping  ');
+  await client.highlight('abc', 'a passage', '   ');
+  assert.equal(made.id, 'h1');
+  assert.equal(`${seen[0]!.method} ${new URL(seen[0]!.url).pathname}`, 'POST /api/highlights');
+  assert.deepEqual(seen[0]!.body, { articleId: 'abc', text: 'a passage' });
+  assert.deepEqual(seen[1]!.body, { articleId: 'abc', text: 'a passage', note: 'worth keeping' });
+  assert.deepEqual(seen[2]!.body, { articleId: 'abc', text: 'a passage' });
+});
+
+test('deleting a highlight names it in the path', async () => {
+  let seen = '';
+  const client = createClient(SERVER, 'rl_x', fetchStub((s) => {
+    seen = `${s.method} ${new URL(s.url).pathname}`;
+    return Response.json({ success: true });
+  }));
+  await client.deleteHighlight('h 1');
+  assert.equal(seen, 'DELETE /api/highlights/h%201');
+});
+
 test('highlights come back as a page with a total', async () => {
   let url = '';
   const client = createClient(SERVER, 'rl_x', fetchStub((s) => {

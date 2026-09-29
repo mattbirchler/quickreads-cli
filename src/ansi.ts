@@ -6,8 +6,8 @@ export const useColor = (): boolean =>
 
 // Primary ink is the terminal's own default foreground so the reader's theme
 // stays in charge. Hierarchy comes from weight and two quieter inks; the one
-// accent is Quick Reads purple, and the remaining colours each mean something
-// (done, warning, error, a highlighted passage, a tag's own colour).
+// accent is Quick Reads purple, and the remaining colors each mean something
+// (done, warning, error, a highlighted passage, a tag's own color).
 // Truecolor where the terminal speaks it, the nearest xterm-256 index where
 // it does not.
 type Depth = 'truecolor' | '256' | 'basic';
@@ -37,7 +37,7 @@ const luminance = ([r, g, b]: Rgb): number => (0.2126 * r + 0.7152 * g + 0.0722 
 /** Dark unless the terminal said otherwise: most are, and the dark inks are the gentler mistake. */
 export const isDark = (): boolean => background === null || luminance(background) < 0.5;
 
-/** Whether a background tint can be mixed from the terminal's own colour. */
+/** Whether a background tint can be mixed from the terminal's own color. */
 export const canTint = (): boolean =>
   useColor() && colorDepth() === 'truecolor' && background !== null;
 
@@ -50,7 +50,7 @@ const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
 interface Ink {
   // For dark backgrounds, and for light ones when `light` is absent.
   rgb: Rgb;
-  // The same colour with enough weight to read on a light background.
+  // The same color with enough weight to read on a light background.
   light?: Rgb;
   xterm: number;
   // What to fall back to when the terminal has only the basic eight.
@@ -87,7 +87,7 @@ export const ok = fg({ rgb: [91, 208, 126], light: [22, 140, 70], xterm: 78, bas
 export const warn = fg({ rgb: [224, 165, 66], light: [180, 110, 10], xterm: 214, basic: '33' });
 export const err = fg({ rgb: [255, 122, 114], light: [210, 50, 45], xterm: 210, basic: '31' });
 
-// The tag palette Quick Reads assigns from. A colour this list has never
+// The tag palette Quick Reads assigns from. A color this list has never
 // heard of falls back to the quiet ink rather than guessing.
 const TAG_INKS: Record<string, Ink> = {
   blue: { rgb: [96, 165, 250], light: [37, 99, 235], xterm: 75, basic: '34' },
@@ -112,13 +112,23 @@ const bg = (rgb: Rgb, s: string): string =>
  * when that is known, which keeps every ink on the row legible; plain reverse
  * video when it is not, which works on any terminal ever made.
  *
- * The text may carry its own colours. They all reset the foreground only, so
+ * The text may carry its own colors. They all reset the foreground only, so
  * the wash survives them.
  */
 export function selected(s: string): string {
   if (!canTint()) return reverse(s);
   const accentRgb = isDark() ? ACCENT.rgb : ACCENT.light!;
   return bg(mix(background!, accentRgb, isDark() ? 0.24 : 0.14), s);
+}
+
+/**
+ * The passage being chosen for a highlight. Stronger than the selected row,
+ * because it sits in running text rather than owning a whole line.
+ */
+export function pick(s: string): string {
+  if (!canTint()) return reverse(s);
+  const accentRgb = isDark() ? ACCENT.rgb : ACCENT.light!;
+  return bg(mix(background!, accentRgb, isDark() ? 0.5 : 0.28), s);
 }
 
 /**
@@ -133,7 +143,7 @@ export function surface(s: string): string {
 
 /**
  * A highlighted passage: dark ink on highlighter yellow, which reads the same
- * on a light theme and a dark one because it sets both colours itself.
+ * on a light theme and a dark one because it sets both colors itself.
  */
 export function mark(s: string): string {
   if (!useColor() || s === '') return s;

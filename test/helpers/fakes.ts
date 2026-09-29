@@ -140,6 +140,25 @@ export function fakeClient(seed: Partial<FakeAccount> = {}): FakeClient {
       called('articleHighlights', id);
       return account.highlights.filter((h) => h.articleId === id);
     },
+    async highlight(articleId, text, note) {
+      called('highlight', JSON.stringify({ articleId, text, ...(note === undefined ? {} : { note }) }));
+      const about = find(articleId);
+      const made = highlight(`made${account.highlights.length + 1}`, articleId, text, {
+        note: note === undefined || note.trim() === '' ? null : note.trim(),
+        createdAt: NOW.toISOString(),
+        articleTitle: about.title,
+        siteName: about.siteName,
+        url: about.url,
+      });
+      account.highlights.unshift(made);
+      return made;
+    },
+    async deleteHighlight(id) {
+      called('deleteHighlight', id);
+      const at = account.highlights.findIndex((h) => h.id === id);
+      if (at < 0) throw new ApiError('not_found', 404, 'Highlight not found');
+      account.highlights.splice(at, 1);
+    },
     async articleTags(id) {
       called('articleTags', id);
       const ids = account.tagged[id] ?? [];
@@ -201,6 +220,6 @@ export function fakeIo(over: Partial<FakeIo> = {}): FakeIo {
 export function flags(over: Partial<Flags> = {}): Flags {
   return {
     json: false, plain: false, archived: false, todo: false, text: false, noPager: false,
-    limit: null, width: null, tag: null, title: null, server: null, token: null, ...over,
+    limit: null, width: null, tag: null, title: null, note: null, server: null, token: null, ...over,
   };
 }

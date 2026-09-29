@@ -2,9 +2,12 @@
 // width, so the `read` command and the interactive reader share it and the
 // tests can assert on whole pages of output.
 import type { Article, Highlight } from './types.ts';
-import { parseHtml, markHighlights, type Block, type Document, type Span, type Style } from './html.ts';
 import {
-  accent, bold, canTint, hyperlink, ink2, ink3, italic, mark, stringWidth, surface, tagInk, truncate, underline,
+  parseHtml, markHighlights, markSelection, proseOf, type Block, type Document, type Span, type Style,
+} from './html.ts';
+import {
+  accent, bold, canTint, hyperlink, ink2, ink3, italic, mark, pick, stringWidth, surface, tagInk, truncate, underline,
+  useColor,
 } from './ansi.ts';
 import { longDate, readingTime, siteOf, titleOf } from './format.ts';
 
@@ -17,6 +20,9 @@ const MIN_TEXT_WIDTH = 16;
 interface Piece {
   text: string;
   style: Style;
+  // Where this text starts in its block's prose. Absent on apparatus (link
+  // markers, image notes), which the prose does not contain.
+  at?: number;
 }
 
 type Unit =
@@ -37,10 +43,13 @@ function unitsOf(spans: Span[]): Unit[] {
     units.push({ kind: 'word', pieces: word, width: word.reduce((w, p) => w + stringWidth(p.text), 0) });
     word = [];
   };
+  let at = 0;
   for (const span of spans) {
     if (span.br) {
       endWord();
       units.push({ kind: 'break' });
+      // A line break reads as a space in the prose.
+      at += 1;
       continue;
     }
     const { text, br: _, ...style } = span;
@@ -50,8 +59,9 @@ function unitsOf(spans: Span[]): Unit[] {
         endWord();
         units.push({ kind: 'space', style });
       } else {
-        word.push({ text: part, style });
+        word.push(style.note ? { text: part, style } : { text: part, style, at });
       }
+      if (!style.note) at += part.length;
     }
   }
   endWord();
@@ -64,18 +74,27 @@ function splitWord(pieces: Piece[], width: number): Piece[][] {
   let used = 0;
   for (const piece of pieces) {
     let text = '';
+    // How much of this piece earlier runs have taken.
+    let taken = 0;
+    const cut = (): Piece => {
+      const part: Piece = piece.at === undefined
+        ? { text, style: piece.style }
+        : { text, style: piece.style, at: piece.at + taken };
+      taken += text.length;
+      text = '';
+      return part;
+    };
     for (const ch of piece.text) {
       const w = stringWidth(ch);
       if (used + w > width && used > 0) {
-        if (text !== '') runs[runs.length - 1]!.push({ text, style: piece.style });
+        if (text !== '') runs[runs.length - 1]!.push(cut());
         runs.push([]);
-        text = '';
         used = 0;
       }
       text += ch;
       used += w;
     }
-    if (text !== '') runs[runs.length - 1]!.push({ text, style: piece.style });
+    if (text !== '') runs[runs.length - 1]!.push(cut());
   }
   return runs;
 }
@@ -121,7 +140,7 @@ function wrapUnits(units: Unit[], width: number): Piece[][] {
 }
 
 const styleKey = (s: Style): string =>
-  `${s.bold ? 'b' : ''}${s.italic ? 'i' : ''}${s.code ? 'c' : ''}${s.link ? 'l' : ''}${s.note ? 'n' : ''}${s.mark ? 'm' : ''}|${s.href ?? ''}`;
+  `${s.bold ? 'b' : ''}${s.italic ? 'i' : ''}${s.code ? 'c' : ''}${s.link ? 'l' : ''}${s.note ? 'n' : ''}${s.mark ? 'm' : ''}${s.pick ? 'p' : ''}|${s.href ?? ''}`;
 
 export interface LayoutOptions {
   // Make links clickable. Off by default: the escape sequence is only safe
@@ -134,8 +153,10 @@ function paint(text: string, style: Style, base: (s: string) => string, options:
   if (style.link) out = underline(out);
   if (style.italic) out = italic(out);
   if (style.bold) out = bold(out);
-  // A highlight sets its own ink, so the quieter inks stand down inside one.
-  if (style.mark) out = mark(out);
+  // The passage being chosen outranks one already highlighted. A highlight
+  // sets its own ink, so the quieter inks stand down inside one.
+  if (style.pick) out = pick(out);
+  else if (style.mark) out = mark(out);
   else if (style.note) out = ink3(out);
   else if (style.code) out = ink2(out);
   else out = base(out);
@@ -174,10 +195,27 @@ export interface Mark {
   text: string;
 }
 
+// Where one line of output starts in the article's text.
+export interface Anchor {
+  line: number;
+  block: number;
+  at: number;
+}
+
+// What the layout found on the way through, for whoever needs to know where
+// things landed.
+export interface Found {
+  anchors: Anchor[];
+  // Lines holding part of the passage being chosen, top to bottom.
+  picks: number[];
+}
+
 const markedText = (pieces: Piece[]): string =>
   pieces.filter((p) => p.style.mark && !p.style.note).map((p) => p.text).join('');
 
-function layoutBlock(block: Block, width: number, marks: Mark[], offset: number, options: LayoutOptions): string[] {
+function layoutBlock(
+  block: Block, index: number, width: number, marks: Mark[], offset: number, options: LayoutOptions, found: Found,
+): string[] {
   const bar = accent('│') + ' ';
   const quoteCols = block.quote * 2;
   // Indentation yields before the text does.
@@ -198,7 +236,7 @@ function layoutBlock(block: Block, width: number, marks: Mark[], offset: number,
       const runs = line === '' ? [[]] : splitWord([{ text: line, style: {} }], codeWidth);
       for (const run of runs) code.push(run.map((p) => p.text).join(''));
     }
-    // A panel behind the code where the terminal's colour is known. The
+    // A panel behind the code where the terminal's color is known. The
     // panel is as wide as its longest line, with a line of padding above and
     // below; without it the indent and the quieter ink do the job.
     if (!canTint()) return code.map((text) => `${lead}  ${ink2(text)}`.trimEnd());
@@ -214,6 +252,9 @@ function layoutBlock(block: Block, width: number, marks: Mark[], offset: number,
   return wrapUnits(unitsOf(block.spans), textWidth).map((pieces, i) => {
     const text = markedText(pieces);
     if (text.trim() !== '') marks.push({ line: offset + i, text });
+    const at = pieces.find((p) => p.at !== undefined)?.at;
+    if (at !== undefined) found.anchors.push({ line: offset + i, block: index, at });
+    if (pieces.some((p) => p.style.pick)) found.picks.push(offset + i);
     return `${lead}${i === 0 ? first : rest}${paintLine(pieces, base, options)}`.trimEnd();
   });
 }
@@ -223,16 +264,18 @@ const tight = (a: Block, b: Block): boolean =>
   (a.hang > 0 || a.indent > 0) && (b.hang > 0 || b.indent > 0) && a.quote === b.quote && b.kind !== 'heading';
 
 /** The document as lines wrapped to `width`, with a Links section when it has any. */
-export function layoutDocument(doc: Document, width: number, marks: Mark[] = [], options: LayoutOptions = {}): string[] {
+export function layoutDocument(
+  doc: Document, width: number, marks: Mark[] = [], options: LayoutOptions = {}, found: Found = { anchors: [], picks: [] },
+): string[] {
   const out: string[] = [];
   let previous: Block | null = null;
-  for (const block of doc.blocks) {
+  for (const [index, block] of doc.blocks.entries()) {
     if (previous !== null && !tight(previous, block)) {
       // Inside a quote the bar keeps running through the gap.
       const shared = Math.min(previous.quote, block.quote);
       out.push(shared > 0 ? (accent('│') + ' ').repeat(shared).trimEnd() : '');
     }
-    out.push(...layoutBlock(block, width, marks, out.length, options));
+    out.push(...layoutBlock(block, index, width, marks, out.length, options, found));
     previous = block;
   }
 
@@ -272,6 +315,8 @@ export interface ReaderOptions extends LayoutOptions {
   showUrl?: boolean;
   // What to say, after the reason, when the article has no text to show.
   emptyHint?: string;
+  // The passage being chosen for a new highlight.
+  selection?: { block: number; from: number; to: number } | null;
 }
 
 function whyEmpty(article: Article): string {
@@ -294,7 +339,7 @@ export function articleHeader(article: Article, width: number, showUrl = true): 
     length === '' ? '' : `${length} read`,
   ].filter((s) => s !== '').join(' · ');
   for (const line of wrapText(meta, width)) out.push(ink3(line));
-  // Tags in their own colours, as many as fit on one line.
+  // Tags in their own colors, as many as fit on one line.
   let tags = '';
   let used = 0;
   for (const tag of article.tags ?? []) {
@@ -318,6 +363,12 @@ export interface RenderedArticle {
   marked: number;
   // Every line carrying highlighted text, top to bottom.
   marks: Mark[];
+  // Each block's prose, the text a selection is measured in.
+  prose: string[];
+  // Where each line of prose starts in it.
+  anchors: Anchor[];
+  // The lines the passage being chosen is on.
+  picks: number[];
 }
 
 /**
@@ -342,13 +393,26 @@ export function renderArticle(article: Article, options: ReaderOptions): Rendere
   if (doc.blocks.length === 0) {
     const message = [whyEmpty(article), options.emptyHint ?? ''].filter((s) => s !== '').join(' ');
     lines.push(...wrapText(message, width).map((l) => ink2(l)));
-    return { lines, links: [], marked: 0, marks: [] };
+    return { lines, links: [], marked: 0, marks: [], prose: [], anchors: [], picks: [] };
   }
 
+  // Measured before anything is marked: marking splits spans but moves no text.
+  const prose = proseOf(doc);
   const marked = markHighlights(doc, (options.highlights ?? []).map((h) => h.text));
+  // Where styling is off, brackets are what shows the passage.
+  if (options.selection) markSelection(doc, options.selection, !useColor());
   const marks: Mark[] = [];
-  const body = layoutDocument(doc, width, marks, options);
+  const found: Found = { anchors: [], picks: [] };
+  const body = layoutDocument(doc, width, marks, options, found);
   const top = lines.length;
   lines.push(...body);
-  return { lines, links: doc.links, marked, marks: marks.map((m) => ({ ...m, line: m.line + top })) };
+  return {
+    lines,
+    links: doc.links,
+    marked,
+    marks: marks.map((m) => ({ ...m, line: m.line + top })),
+    prose,
+    anchors: found.anchors.map((a) => ({ ...a, line: a.line + top })),
+    picks: found.picks.map((line) => line + top),
+  };
 }

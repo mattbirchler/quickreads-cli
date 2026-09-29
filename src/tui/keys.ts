@@ -9,6 +9,7 @@ const SEQUENCES: Record<string, string> = {
   '\x1b[1~': 'home', '\x1b[4~': 'end', '\x1b[7~': 'home', '\x1b[8~': 'end',
   '\x1b[5~': 'pageup', '\x1b[6~': 'pagedown',
   '\x1b[Z': 'shift-tab',
+  '\x1b[1;2A': 'shift-up', '\x1b[1;2B': 'shift-down', '\x1b[1;2C': 'shift-right', '\x1b[1;2D': 'shift-left',
   '\x1b[3~': 'delete',
 };
 

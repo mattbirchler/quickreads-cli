@@ -17,6 +17,8 @@ export interface Style {
   note?: boolean;
   // Part of a passage the reader highlighted.
   mark?: boolean;
+  // Part of the passage being chosen for a new highlight.
+  pick?: boolean;
 }
 
 export interface Span extends Style {
@@ -119,7 +121,7 @@ const sameStyle = (a: Style, b: Style): boolean =>
 /**
  * One block's spans, tidied: whitespace collapsed to single spaces (across
  * span boundaries too), none at the edges of the block or around a hard
- * break, neighbours of the same style merged.
+ * break, neighbors of the same style merged.
  */
 export function tidySpans(spans: Span[]): Span[] {
   const out: Span[] = [];
@@ -382,6 +384,33 @@ export function markHighlights(doc: Document, highlights: string[]): number {
   return found;
 }
 
+// Differences a person typing a quotation out should be forgiven: case, and
+// which kind of quote mark or dash. One character for one, so that a match
+// in the folded text is at the same place in the real one.
+const FOLDS: Record<string, string> = { '‘': "'", '’': "'", '“': '"', '”': '"', '–': '-', '—': '-', '\u00a0': ' ' };
+const fold = (s: string): string => [...s].map((ch) => {
+  const lower = FOLDS[ch] ?? ch.toLowerCase();
+  return lower.length === ch.length ? lower : ch;
+}).join('');
+
+/**
+ * The passage as the article words it, or null when the article does not
+ * contain it. What comes back is what a highlight should quote.
+ */
+export function findPassage(doc: Document, passage: string): string | null {
+  const wanted = passage.replace(/\s+/g, ' ').trim();
+  if (wanted === '') return null;
+  const texts = doc.blocks.filter((b) => b.kind !== 'pre' && b.kind !== 'rule').map(blockText);
+  if (texts.some((text) => text.includes(wanted))) return wanted;
+  for (const text of texts) {
+    const at = fold(text).indexOf(fold(wanted));
+    if (at >= 0) return text.slice(at, at + wanted.length);
+  }
+  // Across paragraphs it has to be word for word.
+  const copy: Document = { links: doc.links, blocks: doc.blocks.map((b) => ({ ...b, spans: b.spans.map((span) => ({ ...span })) })) };
+  return markHighlights(copy, [wanted]) === 1 ? wanted : null;
+}
+
 // The shortest overlap trusted to start a multi-block match. Below this a
 // common word at the end of a paragraph could claim a highlight it never had.
 const MIN_OVERLAP = 8;
@@ -409,8 +438,8 @@ function spanningMatch(texts: string[], start: number, wanted: string): { from: 
   return null;
 }
 
-/** Mark [from, to) of a block's prose, splitting spans at the edges. */
-function markRange(block: Block, from: number, to: number): void {
+/** Style [from, to) of a block's prose, splitting spans at the edges. */
+function styleRange(block: Block, from: number, to: number, key: 'mark' | 'pick'): void {
   const out: Span[] = [];
   let at = 0;
   for (const span of block.spans) {
@@ -422,7 +451,7 @@ function markRange(block: Block, from: number, to: number): void {
     if (span.note) {
       // Markers take no room in the prose; one that sits inside the passage
       // joins it so the highlight is not broken by a gap.
-      out.push(at > from && at < to ? { ...span, mark: true } : span);
+      out.push(at > from && at < to ? { ...span, [key]: true } : span);
       continue;
     }
     const end = at + span.text.length;
@@ -432,12 +461,40 @@ function markRange(block: Block, from: number, to: number): void {
       out.push(span);
     } else {
       if (a > at) out.push({ ...span, text: span.text.slice(0, a - at) });
-      out.push({ ...span, text: span.text.slice(a - at, b - at), mark: true });
+      out.push({ ...span, text: span.text.slice(a - at, b - at), [key]: true });
       if (b < end) out.push({ ...span, text: span.text.slice(b - at) });
     }
     at = end;
   }
   block.spans = out;
+}
+
+const markRange = (block: Block, from: number, to: number): void => styleRange(block, from, to, 'mark');
+
+/**
+ * Each block's prose, by block index, with '' for the blocks a highlight is
+ * not made in (code, rules, headings, anything empty). Offsets into these
+ * strings are what a selection is measured in.
+ */
+export function proseOf(doc: Document): string[] {
+  return doc.blocks.map((b) => (b.kind === 'text' ? blockText(b) : ''));
+}
+
+/**
+ * Show a passage as chosen. With `brackets` it is also fenced in square
+ * brackets, for a terminal where styling is off and the fence is all there is.
+ */
+export function markSelection(doc: Document, selection: { block: number; from: number; to: number }, brackets = false): void {
+  const block = doc.blocks[selection.block];
+  if (block === undefined || selection.from >= selection.to) return;
+  styleRange(block, selection.from, selection.to, 'pick');
+  if (!brackets) return;
+  const first = block.spans.findIndex((s) => s.pick);
+  if (first < 0) return;
+  const last = block.spans.findLastIndex((s) => s.pick);
+  // Notes take no room in the prose, so the fence moves no offsets.
+  block.spans.splice(last + 1, 0, { text: ']', note: true, pick: true });
+  block.spans.splice(first, 0, { text: '[', note: true, pick: true });
 }
 
 /** HTML to plain text, one paragraph per line. For excerpts and search. */

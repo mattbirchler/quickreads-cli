@@ -42,3 +42,7 @@ test('isPrintable tells typing from doing', () => {
   assert.equal(isPrintable('enter'), false);
   assert.equal(isPrintable('up'), false);
 });
+
+test('shift with an arrow is its own key', () => {
+  assert.deepEqual(parseKeys('\x1b[1;2A\x1b[1;2B\x1b[1;2C\x1b[1;2D'), ['shift-up', 'shift-down', 'shift-right', 'shift-left']);
+});

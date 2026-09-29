@@ -75,7 +75,7 @@ export function runBrowse(client: Client): Promise<number> {
     // screen with its cursor hidden.
     process.on('exit', restoreScreen);
 
-    // The first frame waits for the terminal to say what colour it is, so the
+    // The first frame waits for the terminal to say what color it is, so the
     // screen is drawn once in the right inks rather than twice.
     void probeBackground(stdin, stdout).then(({ rgb, typed }) => {
       if (!live) return;
