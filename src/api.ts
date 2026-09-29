@@ -43,10 +43,10 @@ const KIND_BY_STATUS: Record<number, ApiErrorKind> = {
 const READ_TIMEOUT_MS = 20_000;
 const SAVE_TIMEOUT_MS = 90_000;
 
-export type Requester = <T>(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs?: number) => Promise<T>;
+export type Requester = <T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs?: number) => Promise<T>;
 
 export function createRequester(serverUrl: string, token: string, fetchImpl: typeof fetch = fetch): Requester {
-  return async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = READ_TIMEOUT_MS): Promise<T> {
+  return async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs = READ_TIMEOUT_MS): Promise<T> {
     let res: Response;
     try {
       res = await fetchImpl(`${serverUrl}${path}`, {
@@ -132,6 +132,9 @@ export interface Client {
   unarchive(id: string): Promise<void>;
   highlights(params?: { limit?: number; offset?: number }): Promise<HighlightsPage>;
   articleHighlights(id: string): Promise<Highlight[]>;
+  /** Highlight a passage. `text` has to quote the article for readers to find it again. */
+  highlight(articleId: string, text: string, note?: string): Promise<Highlight>;
+  deleteHighlight(id: string): Promise<void>;
   articleTags(id: string): Promise<Tag[]>;
   tags(): Promise<Tag[]>;
   /** Where this article lives in the Quick Reads web app. */
@@ -210,6 +213,14 @@ export function createClient(serverUrl: string, token: string, fetchImpl: typeof
       return request<HighlightsPage>('GET', `/api/highlights?${q.toString()}`);
     },
     articleHighlights: (id) => request<Highlight[]>('GET', `${at(id)}/highlights`),
+    highlight(articleId, text, note) {
+      const body: Record<string, unknown> = { articleId, text };
+      if (note !== undefined && note.trim() !== '') body['note'] = note.trim();
+      return request<Highlight>('POST', '/api/highlights', body);
+    },
+    async deleteHighlight(id) {
+      await request<unknown>('DELETE', `/api/highlights/${encodeURIComponent(id)}`);
+    },
     articleTags: (id) => request<Tag[]>('GET', `${at(id)}/tags`),
 
     tags: () => request<Tag[]>('GET', '/api/tags'),
