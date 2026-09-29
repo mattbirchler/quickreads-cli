@@ -151,3 +151,39 @@ test('output for a pipe carries no escape sequences at all', () => {
   assert.ok(lines.includes('  code()'));
   assert.ok(lines.includes('│ Quoted.'));
 });
+
+const LONG = '<h2>Heading</h2><p>First sentence of the piece. Second sentence, with a <a href="/x">link</a> in it. Third one here.</p>'
+  + '<pre>code()</pre><p>Another paragraph.</p>';
+
+test('every line of prose knows where it starts in the text', () => {
+  const { lines, anchors, prose } = renderArticle(article({ content: LONG }), { width: 30 });
+  assert.deepEqual(prose, ['Heading', 'First sentence of the piece. Second sentence, with a link in it. Third one here.', '', 'Another paragraph.']);
+  for (const anchor of anchors) {
+    const line = lines[anchor.line]!.replace(/\[\d+\]/g, '').trim();
+    const word = line.split(' ')[0]!;
+    assert.ok(prose[anchor.block]!.slice(anchor.at).startsWith(word), `line ${anchor.line} "${line}" at ${anchor.at}`);
+  }
+  // Code has no prose to anchor in.
+  assert.ok(!anchors.some((a) => a.block === 2));
+  assert.deepEqual(anchors.filter((a) => a.block === 1).map((a) => a.at), [0, 29, 53]);
+});
+
+test('a word too long for the line keeps its place in the text across the cut', () => {
+  const { lines, anchors, prose } = renderArticle(article({ content: '<p>See abcdefghijklmnopqrstuvwxyz now.</p>' }), { width: 10 });
+  const body = anchors.map((a) => [lines[a.line], prose[a.block]!.slice(a.at, a.at + 4)]);
+  assert.deepEqual(body, [['See', 'See '], ['abcdefghij', 'abcd'], ['klmnopqrst', 'klmn'], ['uvwxyz', 'uvwx'], ['now.', 'now.']]);
+});
+
+test('without styling, the passage being chosen is fenced in brackets', () => {
+  const { lines, picks } = renderArticle(article({ content: LONG }), { width: 30, selection: { block: 1, from: 29, to: 64 } });
+  const chosen = picks.map((n) => lines[n]!).join(' ');
+  assert.equal(chosen, '[Second sentence, with a link[1] in it.] Third one');
+  // The fence takes room on the line but none in the text.
+  assert.ok(lines.every((l) => l.length <= 30));
+});
+
+test('no selection, no brackets and no picked lines', () => {
+  const { lines, picks } = renderArticle(article({ content: LONG }), { width: 30, selection: null });
+  assert.deepEqual(picks, []);
+  assert.ok(!lines.some((l) => l.includes('[S')));
+});

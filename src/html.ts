@@ -17,6 +17,8 @@ export interface Style {
   note?: boolean;
   // Part of a passage the reader highlighted.
   mark?: boolean;
+  // Part of the passage being chosen for a new highlight.
+  pick?: boolean;
 }
 
 export interface Span extends Style {
@@ -409,8 +411,8 @@ function spanningMatch(texts: string[], start: number, wanted: string): { from: 
   return null;
 }
 
-/** Mark [from, to) of a block's prose, splitting spans at the edges. */
-function markRange(block: Block, from: number, to: number): void {
+/** Style [from, to) of a block's prose, splitting spans at the edges. */
+function styleRange(block: Block, from: number, to: number, key: 'mark' | 'pick'): void {
   const out: Span[] = [];
   let at = 0;
   for (const span of block.spans) {
@@ -422,7 +424,7 @@ function markRange(block: Block, from: number, to: number): void {
     if (span.note) {
       // Markers take no room in the prose; one that sits inside the passage
       // joins it so the highlight is not broken by a gap.
-      out.push(at > from && at < to ? { ...span, mark: true } : span);
+      out.push(at > from && at < to ? { ...span, [key]: true } : span);
       continue;
     }
     const end = at + span.text.length;
@@ -432,12 +434,40 @@ function markRange(block: Block, from: number, to: number): void {
       out.push(span);
     } else {
       if (a > at) out.push({ ...span, text: span.text.slice(0, a - at) });
-      out.push({ ...span, text: span.text.slice(a - at, b - at), mark: true });
+      out.push({ ...span, text: span.text.slice(a - at, b - at), [key]: true });
       if (b < end) out.push({ ...span, text: span.text.slice(b - at) });
     }
     at = end;
   }
   block.spans = out;
+}
+
+const markRange = (block: Block, from: number, to: number): void => styleRange(block, from, to, 'mark');
+
+/**
+ * Each block's prose, by block index, with '' for the blocks a highlight
+ * cannot be made in (code, rules, anything empty). Offsets into these strings
+ * are what a selection is measured in.
+ */
+export function proseOf(doc: Document): string[] {
+  return doc.blocks.map((b) => (b.kind === 'pre' || b.kind === 'rule' ? '' : blockText(b)));
+}
+
+/**
+ * Show a passage as chosen. With `brackets` it is also fenced in square
+ * brackets, for a terminal where styling is off and the fence is all there is.
+ */
+export function markSelection(doc: Document, selection: { block: number; from: number; to: number }, brackets = false): void {
+  const block = doc.blocks[selection.block];
+  if (block === undefined || selection.from >= selection.to) return;
+  styleRange(block, selection.from, selection.to, 'pick');
+  if (!brackets) return;
+  const first = block.spans.findIndex((s) => s.pick);
+  if (first < 0) return;
+  const last = block.spans.findLastIndex((s) => s.pick);
+  // Notes take no room in the prose, so the fence moves no offsets.
+  block.spans.splice(last + 1, 0, { text: ']', note: true, pick: true });
+  block.spans.splice(first, 0, { text: '[', note: true, pick: true });
 }
 
 /** HTML to plain text, one paragraph per line. For excerpts and search. */

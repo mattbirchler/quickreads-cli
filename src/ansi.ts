@@ -122,6 +122,16 @@ export function selected(s: string): string {
 }
 
 /**
+ * The passage being chosen for a highlight. Stronger than the selected row,
+ * because it sits in running text rather than owning a whole line.
+ */
+export function pick(s: string): string {
+  if (!canTint()) return reverse(s);
+  const accentRgb = isDark() ? ACCENT.rgb : ACCENT.light!;
+  return bg(mix(background!, accentRgb, isDark() ? 0.5 : 0.28), s);
+}
+
+/**
  * A raised surface (a code block, the help panel): the background nudged
  * toward the ink. Without a known background there is no surface, and the
  * caller's own ink has to carry the distinction.

@@ -85,3 +85,28 @@ test('colour never changes where the lines break', () => {
   assert.ok(coloured.some((l) => l.includes('\x1b[')), 'and it was in colour');
   assert.ok(coloured.every((l) => stringWidth(stripAnsi(l)) <= 50));
 });
+
+test('the passage being chosen is tinted, over an existing highlight too, and adds no width', () => {
+  const article = {
+    id: 'a', url: 'https://example.com/a', title: 'T', author: null, siteName: null, excerpt: null, wordCount: 10,
+    type: 'article', publishedAt: null, savedAt: '2026-09-01T00:00:00.000Z', archivedAt: null,
+    content: '<p>One sentence here. Another sentence there.</p>',
+  } as Article;
+  const highlights = [{ id: 'h', articleId: 'a', text: 'sentence here', createdAt: '' }];
+  atTerminal([30, 30, 46], () => {
+    const plain = renderArticle(article, { width: 40, highlights });
+    const picked = renderArticle(article, { width: 40, highlights, selection: { block: 0, from: 0, to: 18 } });
+    const line = picked.lines[picked.picks[0]!]!;
+    assert.deepEqual(picked.picks.length, 1);
+    assert.ok(/\x1b\[48;2;\d+;\d+;\d+mOne /.test(line), JSON.stringify(line));
+    // The highlight's yellow gives way inside the selection.
+    assert.ok(!line.includes('48;2;250;220;110'));
+    assert.ok(!stripAnsi(line).includes('['));
+    assert.equal(stripAnsi(line), stripAnsi(plain.lines[picked.picks[0]!]!));
+  });
+  // A terminal that cannot say its colour gets reverse video.
+  atTerminal(null, () => {
+    const picked = renderArticle(article, { width: 40, selection: { block: 0, from: 0, to: 18 } });
+    assert.ok(picked.lines[picked.picks[0]!]!.includes('\x1b[7mOne sentence here.\x1b[27m'));
+  });
+});
