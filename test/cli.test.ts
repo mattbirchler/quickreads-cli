@@ -83,3 +83,10 @@ test('access follows the subscription status, then the tier', () => {
   // A live subscription the server has not mapped to a tier yet still works.
   assert.equal(hasAccess({ ...account, tier: 'free', subscription: sub('active') }), true);
 });
+
+test('highlight takes a passage and a note', () => {
+  const { command, args, flags } = parseArgs(['highlight', '3', 'the words to keep', '--note', 'Why they matter']);
+  assert.equal(command, 'highlight');
+  assert.deepEqual(args, ['3', 'the words to keep']);
+  assert.equal(flags.note, 'Why they matter');
+});

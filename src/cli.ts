@@ -13,6 +13,8 @@ Usage:
   quickreads save <url>...           Save to your queue
   quickreads search <words>          Search everything you have saved
   quickreads highlights [<article>]  Your highlights, newest first
+  quickreads highlight <article> <passage>
+                                     Highlight a passage in an article
   quickreads archive <article>...    Archive articles
   quickreads unarchive <article>...  Return articles to the queue
   quickreads open <article>          Open an article in your browser
@@ -40,11 +42,14 @@ Save options:
   --title <title>    A title of your own (To Do items and --text)
   --text             Save text or markdown from standard input
 
+Highlight options:
+  --note <text>      A note of your own to keep with the passage
+
 Search options:
   --tag <name>       Only articles with this tag (works without words too)
   --limit <n>        How many to print (default: 25)
 
-Output options (list, search, highlights, tags, read, save):
+Output options (list, search, highlights, highlight, tags, read, save):
   --json             JSON, one object per line
   --plain            Tab-separated, one item per line
 
@@ -69,6 +74,7 @@ export interface Flags {
   width: number | null;
   tag: string | null;
   title: string | null;
+  note: string | null;
   server: string | null;
   token: string | null;
 }
@@ -84,7 +90,7 @@ export interface Parsed {
 export function parseArgs(argv: string[]): Parsed {
   const flags: Flags = {
     json: false, plain: false, archived: false, todo: false, text: false, noPager: false,
-    limit: null, width: null, tag: null, title: null, server: null, token: null,
+    limit: null, width: null, tag: null, title: null, note: null, server: null, token: null,
   };
   const args: string[] = [];
   let command: string | null = null;
@@ -120,6 +126,7 @@ export function parseArgs(argv: string[]): Parsed {
     else if (arg === '--width') flags.width = takesNumber(arg);
     else if (arg === '--tag') flags.tag = takesValue(arg);
     else if (arg === '--title') flags.title = takesValue(arg);
+    else if (arg === '--note') flags.note = takesValue(arg);
     else if (arg === '--server') flags.server = takesValue(arg);
     else if (arg === '--token') flags.token = takesValue(arg);
     else if (arg === '--help' || arg === '-h') command = 'help';

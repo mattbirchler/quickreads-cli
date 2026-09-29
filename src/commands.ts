@@ -10,6 +10,7 @@ import { resolveRef } from './refs.ts';
 import { bold, ink2, ink3, accent, ok, padStart, stringWidth, stripAnsi, tagInk, truncate } from './ansi.ts';
 import { compactTime, count, rowMeta, siteOf, titleOf } from './format.ts';
 import { MAX_READING_WIDTH, renderArticle, wrapText } from './layout.ts';
+import { findPassage, parseHtml } from './html.ts';
 
 export interface Io {
   out(line: string): void;
@@ -303,6 +304,46 @@ function printHighlightRows(ctx: CommandContext, highlights: Highlight[]): void 
   for (const h of highlights) io.out([h.articleId, h.createdAt, h.text, h.note ?? ''].map(cell).join('\t'));
 }
 
+/** Highlight a passage: `quickreads highlight 3 "the words to keep"`. */
+export async function highlight(ctx: CommandContext): Promise<number> {
+  const { client, io, flags, args } = ctx;
+  if (args[0] === undefined) {
+    io.err('Highlight what? Pass an article, then the passage: `quickreads highlight 3 "the words to keep"`.');
+    return 2;
+  }
+  const ref = articleFrom(ctx, args[0]);
+  if (ref === null) return 2;
+
+  // `pbpaste | quickreads highlight 3` quotes what is on the clipboard.
+  let passage = args.slice(1).join(' ');
+  if (passage.trim() === '' && !io.stdinIsTTY) passage = await io.readStdin();
+  if (passage.trim() === '') {
+    io.err('Highlight which passage? Pass it after the article, or pipe it in.');
+    return 2;
+  }
+
+  const { article, highlights: existing } = await waiting(io, 'Loading', loadForReading(client, ref.id));
+  const title = titleOf(article);
+  const quoted = findPassage(parseHtml(article.content ?? ''), passage);
+  if (quoted === null) {
+    io.err((article.content ?? '') === ''
+      ? `${title} has no text to highlight.`
+      : `That passage is not in ${title}. A highlight has to quote the article's own words.`);
+    return 1;
+  }
+
+  const already = existing.find((h) => h.text.replace(/\s+/g, ' ').trim() === quoted);
+  const made = already ?? await waiting(io, 'Highlighting', client.highlight(article.id, quoted, flags.note ?? undefined));
+  if (flags.json) io.out(JSON.stringify(made));
+  // Tab-separated: id, articleId, text, note.
+  else if (flags.plain) io.out([made.id, made.articleId, made.text, made.note ?? ''].map(cell).join('\t'));
+  else {
+    io.out(already === undefined ? `${ok('✓')} Highlighted in ${bold(title)}` : `${accent('•')} Already highlighted in ${bold(title)}`);
+    for (const line of highlightLines(made, Math.min(io.cols, MAX_READING_WIDTH + 6), ' ')) io.out(line);
+  }
+  return 0;
+}
+
 export async function highlights(ctx: CommandContext): Promise<number> {
   const { client, io, flags, args } = ctx;
   const width = Math.min(io.cols, MAX_READING_WIDTH + 6);
@@ -461,6 +502,7 @@ export const COMMANDS: Record<string, (ctx: CommandContext) => Promise<number>> 
   save, add: save,
   search, find: search,
   highlights,
+  highlight,
   archive,
   unarchive,
   open,

@@ -384,6 +384,33 @@ export function markHighlights(doc: Document, highlights: string[]): number {
   return found;
 }
 
+// Differences a person typing a quotation out should be forgiven: case, and
+// which kind of quote mark or dash. One character for one, so that a match
+// in the folded text is at the same place in the real one.
+const FOLDS: Record<string, string> = { '‘': "'", '’': "'", '“': '"', '”': '"', '–': '-', '—': '-', '\u00a0': ' ' };
+const fold = (s: string): string => [...s].map((ch) => {
+  const lower = FOLDS[ch] ?? ch.toLowerCase();
+  return lower.length === ch.length ? lower : ch;
+}).join('');
+
+/**
+ * The passage as the article words it, or null when the article does not
+ * contain it. What comes back is what a highlight should quote.
+ */
+export function findPassage(doc: Document, passage: string): string | null {
+  const wanted = passage.replace(/\s+/g, ' ').trim();
+  if (wanted === '') return null;
+  const texts = doc.blocks.filter((b) => b.kind !== 'pre' && b.kind !== 'rule').map(blockText);
+  if (texts.some((text) => text.includes(wanted))) return wanted;
+  for (const text of texts) {
+    const at = fold(text).indexOf(fold(wanted));
+    if (at >= 0) return text.slice(at, at + wanted.length);
+  }
+  // Across paragraphs it has to be word for word.
+  const copy: Document = { links: doc.links, blocks: doc.blocks.map((b) => ({ ...b, spans: b.spans.map((span) => ({ ...span })) })) };
+  return markHighlights(copy, [wanted]) === 1 ? wanted : null;
+}
+
 // The shortest overlap trusted to start a multi-block match. Below this a
 // common word at the end of a paragraph could claim a highlight it never had.
 const MIN_OVERLAP = 8;

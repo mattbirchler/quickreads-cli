@@ -220,6 +220,6 @@ export function fakeIo(over: Partial<FakeIo> = {}): FakeIo {
 export function flags(over: Partial<Flags> = {}): Flags {
   return {
     json: false, plain: false, archived: false, todo: false, text: false, noPager: false,
-    limit: null, width: null, tag: null, title: null, server: null, token: null, ...over,
+    limit: null, width: null, tag: null, title: null, note: null, server: null, token: null, ...over,
   };
 }

@@ -426,3 +426,87 @@ test('machine output carries no marks', async () => {
   const json = await run('archive', ['a1'], { json: true });
   assert.deepEqual(json.io.stdout.map((l) => JSON.parse(l)), [{ id: 'a1', archived: true }]);
 });
+
+// ── highlight ───────────────────────────────────────────────────────────────
+
+function readable(): FakeClient {
+  return fakeClient({
+    articles: [
+      article('a1', {
+        title: 'Native app propaganda',
+        content: '<p>People say “web apps” are <em>fine</em>. The details matter more than the platform.</p><p>A second paragraph closes it.</p>',
+      }),
+      article('t1', { title: 'Try this app', type: 'link', content: null, wordCount: 0 }),
+    ],
+    highlights: [highlight('h1', 'a1', 'A second paragraph closes it.')],
+  });
+}
+
+test('highlight quotes a passage from an article', async () => {
+  const { code, io, client } = await run('highlight', ['a1', 'The details matter'], {}, readable());
+  assert.equal(code, 0);
+  assert.ok(client.calls.includes('highlight {"articleId":"a1","text":"The details matter"}'));
+  assert.deepEqual(io.stdout, ['✓ Highlighted in Native app propaganda', ' ▎ The details matter']);
+});
+
+test('highlight takes the passage as separate words, and a note', async () => {
+  const { io, client } = await run('highlight', ['a1', 'details', 'matter', 'more'], { note: 'The thesis.' }, readable());
+  assert.ok(client.calls.includes('highlight {"articleId":"a1","text":"details matter more","note":"The thesis."}'));
+  assert.deepEqual(io.stdout.slice(1), [' ▎ details matter more', '   Note: The thesis.']);
+});
+
+test('highlight forgives case and straight quotes, and saves the article\'s own words', async () => {
+  const { code, client } = await run('highlight', ['a1', 'people say "web apps" are fine'], {}, readable());
+  assert.equal(code, 0);
+  assert.ok(client.calls.includes('highlight {"articleId":"a1","text":"People say “web apps” are fine"}'));
+});
+
+test('highlight reads the passage from a pipe', async () => {
+  const io = fakeIo({ stdinIsTTY: false, stdin: '  The details matter more\n than the platform.\n' });
+  const { code, client } = await run('highlight', ['a1'], {}, readable(), io);
+  assert.equal(code, 0);
+  assert.ok(client.calls.includes('highlight {"articleId":"a1","text":"The details matter more than the platform."}'));
+});
+
+test('highlight refuses a passage the article does not contain, before asking the server', async () => {
+  const { code, io, client } = await run('highlight', ['a1', 'Words that are not there'], {}, readable());
+  assert.equal(code, 1);
+  assert.match(io.stderr.join(' '), /That passage is not in Native app propaganda/);
+  assert.ok(!client.calls.some((c) => c.startsWith('highlight ')));
+});
+
+test('highlight says when an article has no text', async () => {
+  const { code, io } = await run('highlight', ['t1', 'anything'], {}, readable());
+  assert.equal(code, 1);
+  assert.match(io.stderr.join(' '), /Try this app has no text to highlight\./);
+});
+
+test('highlighting the same passage twice makes one highlight', async () => {
+  const { code, io, client } = await run('highlight', ['a1', 'A second paragraph closes it.'], {}, readable());
+  assert.equal(code, 0);
+  assert.ok(!client.calls.some((c) => c.startsWith('highlight ')));
+  assert.equal(io.stdout[0], '• Already highlighted in Native app propaganda');
+});
+
+test('highlight needs an article and a passage', async () => {
+  assert.equal((await run('highlight', [], {}, readable())).code, 2);
+  const { code, io } = await run('highlight', ['a1'], {}, readable());
+  assert.equal(code, 2);
+  assert.match(io.stderr.join(' '), /Highlight which passage\?/);
+});
+
+test('highlight prints what it made for scripts', async () => {
+  const json = await run('highlight', ['a1', 'The details matter'], { json: true }, readable());
+  assert.equal(JSON.parse(json.io.stdout[0]!).text, 'The details matter');
+  const plain = await run('highlight', ['a1', 'The details matter'], { plain: true, note: 'Yes.' }, readable());
+  assert.deepEqual(plain.io.stdout, ['made2\ta1\tThe details matter\tYes.']);
+});
+
+test('highlight takes a row number from the last listing', async () => {
+  const client = readable();
+  const io = fakeIo();
+  await run('list', [], {}, client, io);
+  const { code } = await run('highlight', ['1', 'The details matter'], {}, client, io);
+  assert.equal(code, 0);
+  assert.ok(client.calls.includes('highlight {"articleId":"a1","text":"The details matter"}'));
+});
