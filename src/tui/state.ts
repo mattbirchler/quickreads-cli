@@ -2,6 +2,8 @@
 // (app.ts) changes it and the renderer (render.ts) draws it; neither the
 // terminal nor the network appears here.
 import type { Article, Highlight } from '../types.ts';
+import type { Anchor } from '../layout.ts';
+import type { Selection } from '../select.ts';
 
 export type Source =
   | { kind: 'queue' }
@@ -41,6 +43,13 @@ export interface ReaderView {
   scroll: number;
   // Where Esc goes back to.
   from: 'list' | 'highlights';
+  // The passage being chosen for a new highlight, while one is.
+  marking: Selection | null;
+  // The article's text by block, and where each line on screen starts in it.
+  prose: string[];
+  anchors: Anchor[];
+  // The lines the passage being chosen is on.
+  picks: number[];
 }
 
 export interface HighlightsView {
@@ -54,7 +63,7 @@ export interface HighlightsView {
 }
 
 export interface Prompt {
-  kind: 'search' | 'save';
+  kind: 'search' | 'save' | 'note';
   value: string;
 }
 

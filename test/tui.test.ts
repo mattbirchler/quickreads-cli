@@ -10,6 +10,7 @@ import { createApp, type App, type Terminal } from '../src/tui/app.ts';
 import { progressBar } from '../src/tui/render.ts';
 import { ApiError } from '../src/api.ts';
 import { stringWidth } from '../src/ansi.ts';
+import { selectedText } from '../src/select.ts';
 import { article, highlight, fakeClient, NOW, type FakeClient } from './helpers/fakes.ts';
 
 const HOUR = 3_600_000;
@@ -700,14 +701,14 @@ test('help on a small terminal still lists every key', async (t) => {
   const r = await rig(library(), { cols: 50, rows: 24 });
   t.after(() => r.app.stop());
   const frame = await r.press('?');
-  for (const does of ['Move or scroll', 'Undo the last archive', 'Roomy or compact rows', 'Quit']) {
+  for (const does of ['Move or scroll', 'Undo the last change', 'Roomy or compact rows', 'Quit']) {
     assert.ok(frame.some((l) => l.includes(does)), does);
   }
 });
 
 test('help on a short terminal gives up titles, then its frame, before it gives up a key', async (t) => {
   const every = ['Move or scroll', 'Save a link', 'Roomy or compact rows', 'Go back', 'Quit'];
-  for (const [rows, panel, titles] of [[22, true, true], [16, true, false], [12, false, false]] as const) {
+  for (const [rows, panel, titles] of [[22, true, true], [17, true, false], [12, false, false]] as const) {
     const r = await rig(library(), { cols: 100, rows });
     t.after(() => r.app.stop());
     const frame = await r.press('?');
@@ -746,7 +747,7 @@ test('? shows the keys over any screen and any key dismisses it', async (t) => {
   t.after(() => r.app.stop());
   let frame = await r.press(`${ENTER}?`);
   assert.match(frame[0]!, /Keys/);
-  assert.ok(frame.some((l) => l.includes('Undo the last archive')));
+  assert.ok(frame.some((l) => l.includes('Undo the last change')));
   frame = await r.press('q');
   assert.equal(r.app.state.screen, 'reader');
   assert.deepEqual(r.quit, []);
@@ -779,4 +780,197 @@ test('nothing is painted after it stops', async (t) => {
   await r.press(`${DOWN}${DOWN}a`);
   assert.equal(r.frames.length, painted);
   assert.ok(!r.client.calls.some((c) => c.startsWith('archive')));
+});
+
+// ── Marking a highlight ─────────────────────────────────────────────────────
+
+function essay(): FakeClient {
+  return fakeClient({
+    articles: [
+      article('e1', {
+        title: 'Essay',
+        wordCount: 900,
+        content: '<h2>Opening</h2>'
+          + '<p>First sentence of the piece. Second sentence, with a <a href="/x">link</a> in it. Third one here.</p>'
+          + '<pre>code()</pre>'
+          + '<p>Another paragraph begins. It has two sentences.</p>'
+          + Array.from({ length: 30 }, (_, i) => `<p>Filler paragraph ${i + 1} goes here. It is followed by more.</p>`).join(''),
+      }),
+      article('l1', { title: 'Just a link', type: 'link', content: null, wordCount: 0, savedAt: ago(5 * HOUR) }),
+    ],
+  });
+}
+
+// The passage being chosen, as the highlight would quote it.
+const chosen = (r: Rig): string | null => {
+  const reader = r.app.state.reader;
+  return reader === null || reader.marking === null ? null : selectedText(reader.prose, reader.marking);
+};
+
+// The reader, open on the essay and finished loading.
+async function reading(size: { cols: number; rows: number }): Promise<Rig> {
+  const r = await rig(essay(), size);
+  await r.press(ENTER);
+  return r;
+}
+
+test('m chooses the first sentence on screen and says what the keys do', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  const frame = await r.press(`m`);
+  // Headings are passed over: a highlight is made in the prose.
+  assert.equal(chosen(r), 'First sentence of the piece.');
+  // Without colour, brackets are what shows it.
+  assert.ok(frame.some((l) => l.includes('[First sentence of the piece.] Second sentence')));
+  assert.match(frame[0]!, /Choosing a highlight · 5 words $/);
+  assert.match(frame[23]!, /^ ↑↓ sentence {3}←→ end by a word .* n add a note {3}↵ highlight {3}esc cancel$/);
+});
+
+test('the passage moves by the sentence, and crosses code to the next paragraph', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  await r.press(`m`);
+  assert.equal((await r.press(DOWN), chosen(r)), 'Second sentence, with a link in it.');
+  assert.equal((await r.press('j'), chosen(r)), 'Third one here.');
+  assert.equal((await r.press(DOWN), chosen(r)), 'Another paragraph begins.');
+  assert.equal((await r.press(`${UP}k`), chosen(r)), 'Second sentence, with a link in it.');
+  // At the top there is nowhere further back to go.
+  assert.equal((await r.press(`${UP}${UP}${UP}`), chosen(r)), 'First sentence of the piece.');
+});
+
+test('either end of the passage moves by the word, and the end by the sentence', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  await r.press(`m${DOWN}`);
+  assert.equal((await r.press('\x1b[D'), chosen(r)), 'Second sentence, with a link in');
+  assert.equal((await r.press('hh'), chosen(r)), 'Second sentence, with a');
+  assert.equal((await r.press('\x1b[C'), chosen(r)), 'Second sentence, with a link');
+  assert.equal((await r.press('L'), chosen(r)), 'sentence, with a link');
+  assert.equal((await r.press('\x1b[1;2C'), chosen(r)), 'with a link');
+  assert.equal((await r.press('H'), chosen(r)), 'sentence, with a link');
+  assert.equal((await r.press('J'), chosen(r)), 'sentence, with a link in it.');
+  assert.equal((await r.press('\x1b[1;2B'), chosen(r)), 'sentence, with a link in it. Third one here.');
+  assert.equal((await r.press('K'), chosen(r)), 'sentence, with a link in it.');
+  assert.match((await r.press('K'))[0]!, /6 words $/);
+});
+
+test('a passage stops at the end of its paragraph, and says so', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  await r.press(`m${DOWN}${DOWN}`);
+  const frame = await r.press('J');
+  assert.equal(chosen(r), 'Third one here.');
+  assert.match(frame[23]!, /A highlight stays inside one paragraph\./);
+  assert.match((await r.press('l'))[23]!, /A highlight stays inside one paragraph\./);
+  // Moving on clears the message.
+  assert.match((await r.press(UP))[23]!, /↵ highlight/);
+});
+
+test('enter saves the passage, shows it highlighted, and leaves the reader reading', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  const frame = await r.press(`m${DOWN}${ENTER}`);
+  assert.ok(r.client.calls.includes('highlight {"articleId":"e1","text":"Second sentence, with a link in it."}'));
+  assert.equal(r.app.state.reader!.marking, null);
+  assert.deepEqual(r.app.state.reader!.highlights.map((h) => h.id), ['made1']);
+  assert.equal(chosen(r), null);
+  assert.ok(!frame.some((l) => l.includes('[Second')));
+  assert.match(frame[23]!, /✓ Highlighted\. Press u to undo\./);
+  // Scrolling works again.
+  await r.press(DOWN);
+  assert.equal(r.app.state.reader!.scroll, 1);
+});
+
+test('u takes the new highlight back', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  await r.press(`m${ENTER}`);
+  const frame = await r.press('u');
+  assert.ok(r.client.calls.includes('deleteHighlight made1'));
+  assert.deepEqual(r.app.state.reader!.highlights, []);
+  assert.deepEqual(r.client.account.highlights, []);
+  assert.match(frame[23]!, /✓ Highlight removed\./);
+  assert.match((await r.press('u'))[23]!, /Nothing to undo\./);
+});
+
+test('n asks for a note and saves it with the passage', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  let frame = await r.press(`mn`);
+  assert.match(frame[23]!, /^ › Note /);
+  // The passage stays chosen behind the prompt, and letters are typed, not obeyed.
+  assert.equal(chosen(r), 'First sentence of the piece.');
+  frame = await r.press(`just so${ENTER}`);
+  assert.ok(r.client.calls.includes('highlight {"articleId":"e1","text":"First sentence of the piece.","note":"just so"}'));
+  assert.equal(r.app.state.reader!.highlights[0]!.note, 'just so');
+});
+
+test('esc from the note goes back to the passage, and esc again lets it go', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  let frame = await r.press(`m${DOWN}n`);
+  frame = await r.press(`half a thought${ESC}`);
+  assert.equal(chosen(r), 'Second sentence, with a link in it.');
+  assert.match(frame[23]!, /↵ highlight/);
+  frame = await r.press(ESC);
+  assert.equal(chosen(r), null);
+  assert.equal(r.app.state.screen, 'reader');
+  assert.ok(!r.client.calls.some((c) => c.startsWith('highlight ')));
+  await r.press(ESC);
+  assert.equal(r.app.state.screen, 'list');
+});
+
+test('a highlight the server refuses is taken back off the page', async (t) => {
+  const r = await reading({ cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  r.client.failNext.highlight = new ApiError('server', 500, 'The server had a problem.');
+  const frame = await r.press(`m${ENTER}`);
+  assert.deepEqual(r.app.state.reader!.highlights, []);
+  assert.match(frame[23]!, /✕ Could not save that highlight: The server had a problem\./);
+  assert.match((await r.press('u'))[23]!, /Nothing to undo\./);
+});
+
+test('the page follows the passage as it moves down', async (t) => {
+  const r = await reading({ cols: 100, rows: 12 });
+  t.after(() => r.app.stop());
+  await r.press(`m`);
+  for (let i = 0; i < 25; i++) {
+    const frame = await r.press(DOWN);
+    assert.notEqual(chosen(r), null, `after ${i + 1} steps`);
+  }
+  assert.ok(r.app.state.reader!.scroll > 20);
+});
+
+test('m starts from what is on screen, not from the top of the article', async (t) => {
+  const r = await reading({ cols: 100, rows: 12 });
+  t.after(() => r.app.stop());
+  await r.press(' ');
+  const top = r.app.state.reader!.scroll;
+  const frame = await r.press('m');
+  assert.match(chosen(r)!, /^(Filler paragraph \d+ goes here|It is followed by more|Another paragraph begins|It has two sentences)\.$/);
+  assert.ok(r.app.state.reader!.picks[0]! >= top);
+});
+
+test('an article with no text has nothing to mark', async (t) => {
+  const r = await rig(essay(), { cols: 100, rows: 24 });
+  t.after(() => r.app.stop());
+  await r.press(`${DOWN}${ENTER}`);
+  const frame = await r.press('m');
+  assert.equal(r.app.state.reader!.marking, null);
+  assert.match(frame[23]!, /There is no text here to highlight\./);
+});
+
+test('frames fit the terminal while a passage is being chosen', async (t) => {
+  for (const size of [{ cols: 80, rows: 24 }, { cols: 40, rows: 10 }, { cols: 24, rows: 6 }]) {
+    const r = await reading(size);
+    t.after(() => r.app.stop());
+    for (const keys of ['m', DOWN, 'J', 'l', 'n', 'a note', ESC, '?', 'x', ENTER]) {
+      const frame = await r.press(keys);
+      assert.equal(frame.length, size.rows);
+      for (const line of frame) {
+        assert.ok(stringWidth(line) <= size.cols, `${size.cols}x${size.rows} after ${JSON.stringify(keys)}: "${line}"`);
+      }
+    }
+    assert.match(r.screen(), /Highlighted|Saving/);
+  }
 });

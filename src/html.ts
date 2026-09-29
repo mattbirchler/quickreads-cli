@@ -445,12 +445,12 @@ function styleRange(block: Block, from: number, to: number, key: 'mark' | 'pick'
 const markRange = (block: Block, from: number, to: number): void => styleRange(block, from, to, 'mark');
 
 /**
- * Each block's prose, by block index, with '' for the blocks a highlight
- * cannot be made in (code, rules, anything empty). Offsets into these strings
- * are what a selection is measured in.
+ * Each block's prose, by block index, with '' for the blocks a highlight is
+ * not made in (code, rules, headings, anything empty). Offsets into these
+ * strings are what a selection is measured in.
  */
 export function proseOf(doc: Document): string[] {
-  return doc.blocks.map((b) => (b.kind === 'pre' || b.kind === 'rule' ? '' : blockText(b)));
+  return doc.blocks.map((b) => (b.kind === 'text' ? blockText(b) : ''));
 }
 
 /**

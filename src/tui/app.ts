@@ -7,6 +7,9 @@ import type { Article, Highlight } from '../types.ts';
 import { progressOf, titleOf } from '../format.ts';
 import { articleHeader, lineOfHighlight, renderArticle } from '../layout.ts';
 import { destinationOf, normalizeUrl } from '../commands.ts';
+import {
+  firstSelection, moveEnd, moveStart, resizeBySentence, selectedText, stepSentence, type Selection,
+} from '../select.ts';
 import { isPrintable, parseKeys } from './keys.ts';
 import { bodyHeight, highlightsBody, listBody, readingColumn, renderFrame, rowHeight } from './render.ts';
 import {
@@ -52,13 +55,16 @@ const SPIN_MS = 120;
 const LOAD_AHEAD = 10;
 const HIGHLIGHTS_PAGE = 50;
 
-interface Undo {
-  article: Article;
-  index: number;
-  tab: Source['kind'];
-  // What the article was changed to; undoing sets it back.
-  archived: boolean;
-}
+type Undo =
+  | {
+    kind: 'archive';
+    article: Article;
+    index: number;
+    tab: Source['kind'];
+    // What the article was changed to; undoing sets it back.
+    archived: boolean;
+  }
+  | { kind: 'highlight'; highlight: Highlight };
 
 function say(err: unknown): string {
   if (err instanceof ApiError && err.kind === 'unauthorized') {
@@ -239,6 +245,44 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
 
   // ── Reader ───────────────────────────────────────────────────────────────
 
+  /** Lay the article out at the reader's width, passage being chosen included. */
+  function renderReader(reader: NonNullable<State['reader']>): ReturnType<typeof renderArticle> {
+    const rendered = renderArticle(reader.article, {
+      width: reader.width,
+      highlights: reader.highlights,
+      selection: reader.marking,
+      showUrl: false,
+      hyperlinks: true,
+      emptyHint: 'Press o to open it in your browser.',
+    });
+    reader.lines = rendered.lines;
+    reader.prose = rendered.prose;
+    reader.anchors = rendered.anchors;
+    reader.picks = rendered.picks;
+    return rendered;
+  }
+
+  /** Bring the passage being chosen into view, with a line of what surrounds it. */
+  function showPicks(reader: NonNullable<State['reader']>): void {
+    const first = reader.picks[0];
+    const last = reader.picks[reader.picks.length - 1];
+    if (first === undefined || last === undefined) return;
+    reader.scroll = clampScroll(
+      scrollToShow(reader.scroll, Math.max(0, first - 1), last + 2, height()),
+      reader.lines.length,
+      height(),
+    );
+  }
+
+  /** Draw the article again where it stands: a highlight came or went, or the passage moved. */
+  function refreshReader(): void {
+    const reader = state.reader;
+    if (reader === null || reader.loading) return;
+    renderReader(reader);
+    reader.scroll = clampScroll(reader.scroll, reader.lines.length, height());
+    showPicks(reader);
+  }
+
   function layoutReader(): void {
     const reader = state.reader;
     if (reader === null) return;
@@ -251,14 +295,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
       reader.scroll = 0;
       return;
     }
-    const rendered = renderArticle(reader.article, {
-      width,
-      highlights: reader.highlights,
-      showUrl: false,
-      hyperlinks: true,
-      emptyHint: 'Press o to open it in your browser.',
-    });
-    reader.lines = rendered.lines;
+    const rendered = renderReader(reader);
     const overflow = Math.max(0, reader.lines.length - height());
     if (seeking !== null) {
       // Open at the passage that was picked, with a little of what leads
@@ -281,6 +318,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
       reader.scroll = Math.round(progress * reader.lines.length);
     }
     reader.scroll = clampScroll(reader.scroll, reader.lines.length, height());
+    showPicks(reader);
   }
 
   function openReader(article: Article, from: 'list' | 'highlights', highlight: string | null = null): void {
@@ -289,6 +327,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
     resuming = true;
     state.reader = {
       article, loading: true, error: null, highlights: [], lines: [], width: 0, scroll: 0, from,
+      marking: null, prose: [], anchors: [], picks: [],
     };
     state.screen = 'reader';
     layoutReader();
@@ -350,7 +389,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
       }
     }
     if (!quiet) {
-      undo = { article: before, index: Math.max(0, index), tab, archived };
+      undo = { kind: 'archive', article: before, index: Math.max(0, index), tab, archived };
       const what = !archived ? 'Back in the queue' : before.list === 'todo' ? 'Done' : 'Archived';
       notice(`${what}: ${titleOf(before)}. Press u to undo.`, 'ok');
     }
@@ -390,6 +429,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
 
   function undoLast(): void {
     if (undo === null) return notice('Nothing to undo.');
+    if (undo.kind === 'highlight') return removeHighlight(undo.highlight);
     const { article, index, tab, archived } = undo;
     undo = null;
     const ticket = listTicket;
@@ -399,6 +439,106 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
         else await client.archive(article.id);
         if (ticket === listTicket) restore(article, index, tab);
         notice(`Undone: ${titleOf(article)}.`, 'ok');
+      } catch (err) {
+        notice(`Could not undo that: ${say(err)}`, 'error');
+      }
+    })());
+  }
+
+  // ── Marking a highlight ──────────────────────────────────────────────────
+
+  function startMarking(): void {
+    const reader = state.reader;
+    if (reader === null || reader.loading || reader.error !== null) return;
+    // Start with the first sentence that begins on screen.
+    const top = reader.anchors.find((a) => a.line >= reader.scroll) ?? reader.anchors[reader.anchors.length - 1];
+    const selection = top === undefined ? null : firstSelection(reader.prose, top.block, top.at);
+    if (selection === null) return notice('There is no text here to highlight.');
+    reader.marking = selection;
+    state.notice = null;
+    refreshReader();
+    paint();
+  }
+
+  function stopMarking(): void {
+    if (state.reader === null) return;
+    state.reader.marking = null;
+    refreshReader();
+    paint();
+  }
+
+  function moveMarking(change: (prose: string[], sel: Selection) => Selection | null, atTheEdge = ''): void {
+    const reader = state.reader;
+    if (reader === null || reader.marking === null) return;
+    const next = change(reader.prose, reader.marking);
+    if (next === null) {
+      if (atTheEdge !== '') notice(atTheEdge);
+      return;
+    }
+    reader.marking = next;
+    state.notice = null;
+    refreshReader();
+    paint();
+  }
+
+  function saveHighlight(note = ''): void {
+    const reader = state.reader;
+    if (reader === null || reader.marking === null) return;
+    const { article } = reader;
+    const text = selectedText(reader.prose, reader.marking);
+    reader.marking = null;
+    if (text === '') return stopMarking();
+
+    // Show it as highlighted now; take it back if the server disagrees.
+    const pending: Highlight = {
+      id: `pending-${term.now().getTime()}`, articleId: article.id, text, note: note.trim() === '' ? null : note.trim(),
+      createdAt: term.now().toISOString(),
+    };
+    reader.highlights.push(pending);
+    refreshReader();
+    notice('Saving the highlight', 'busy');
+
+    const swap = (made: Highlight | null): void => {
+      const open = state.reader;
+      if (open === null || open.article.id !== article.id) return;
+      const at = open.highlights.indexOf(pending);
+      if (at < 0) return;
+      if (made === null) open.highlights.splice(at, 1);
+      else open.highlights[at] = made;
+      refreshReader();
+    };
+    track((async () => {
+      try {
+        const made = await client.highlight(article.id, text, pending.note ?? undefined);
+        swap(made);
+        undo = { kind: 'highlight', highlight: made };
+        notice('Highlighted. Press u to undo.', 'ok');
+      } catch (err) {
+        swap(null);
+        notice(`Could not save that highlight: ${say(err)}`, 'error');
+      }
+    })());
+  }
+
+  function removeHighlight(highlight: Highlight): void {
+    undo = null;
+    track((async () => {
+      try {
+        await client.deleteHighlight(highlight.id);
+        const open = state.reader;
+        if (open !== null && open.article.id === highlight.articleId) {
+          open.highlights = open.highlights.filter((h) => h.id !== highlight.id);
+          refreshReader();
+        }
+        if (state.highlights !== null) {
+          const view = state.highlights;
+          const before = view.items.length;
+          view.items = view.items.filter((h) => h.id !== highlight.id);
+          view.total = Math.max(0, view.total - (before - view.items.length));
+          view.selected = clampSelection(view.selected, view.items.length);
+          showHighlight();
+        }
+        notice('Highlight removed.', 'ok');
       } catch (err) {
         notice(`Could not undo that: ${say(err)}`, 'error');
       }
@@ -549,10 +689,12 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
   function promptKey(key: string): void {
     const prompt = state.prompt;
     if (prompt === null) return;
+    // Esc from a note goes back to the passage, which is still chosen.
     if (key === 'esc') state.prompt = null;
     else if (key === 'enter') {
       state.prompt = null;
       if (prompt.kind === 'search') return submitSearch(prompt.value);
+      if (prompt.kind === 'note') return saveHighlight(prompt.value);
       return submitSave(prompt.value);
     } else if (key === 'backspace') prompt.value = [...prompt.value].slice(0, -1).join('');
     else if (key === 'ctrl-u') prompt.value = '';
@@ -561,7 +703,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
     paint();
   }
 
-  function ask(kind: 'search' | 'save'): void {
+  function ask(kind: 'search' | 'save' | 'note'): void {
     state.notice = null;
     state.prompt = { kind, value: '' };
     paint();
@@ -632,12 +774,33 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
         closeReader();
         return toggleArchive(article);
       }
+      case 'm': return startMarking();
       case 'u': return undoLast();
       case 'o': return openInBrowser(reader.article);
       case 'c': return copyLink(reader.article);
       case '/': return ask('search');
       case '?': return showHelp();
       case 'esc': case 'q': case 'left': case 'h': return closeReader();
+      default:
+    }
+  }
+
+  const ONE_PARAGRAPH = 'A highlight stays inside one paragraph.';
+
+  function markingKey(key: string): void {
+    switch (key) {
+      case 'up': case 'k': return moveMarking((prose, sel) => stepSentence(prose, sel, -1));
+      case 'down': case 'j': return moveMarking((prose, sel) => stepSentence(prose, sel, 1));
+      case 'right': case 'l': return moveMarking((prose, sel) => moveEnd(prose, sel, 1), ONE_PARAGRAPH);
+      case 'left': case 'h': return moveMarking((prose, sel) => moveEnd(prose, sel, -1));
+      case 'shift-down': case 'J': return moveMarking((prose, sel) => resizeBySentence(prose, sel, 1), ONE_PARAGRAPH);
+      case 'shift-up': case 'K': return moveMarking((prose, sel) => resizeBySentence(prose, sel, -1));
+      case 'shift-right': case 'L': return moveMarking((prose, sel) => moveStart(prose, sel, 1));
+      case 'shift-left': case 'H': return moveMarking((prose, sel) => moveStart(prose, sel, -1));
+      case 'enter': case 'm': return saveHighlight();
+      case 'n': return ask('note');
+      case '?': return showHelp();
+      case 'esc': case 'q': return stopMarking();
       default:
     }
   }
@@ -685,7 +848,7 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
       state.screen = state.behindHelp;
       return paint();
     }
-    if (state.screen === 'reader') return readerKey(key);
+    if (state.screen === 'reader') return state.reader?.marking ? markingKey(key) : readerKey(key);
     if (state.screen === 'highlights') return highlightsKey(key);
     return listKey(key);
   }

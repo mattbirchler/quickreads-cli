@@ -14,6 +14,7 @@ import {
 import {
   ageOf, compactTime, count, dayGroup, lengthOf, progressOf, rowMeta, siteOf, timeLeft, titleOf,
 } from '../format.ts';
+import { selectedText, wordsOf } from '../select.ts';
 import { wrapText, MAX_READING_WIDTH } from '../layout.ts';
 import {
   TABS, TAB_LABEL,
@@ -324,7 +325,7 @@ const TONE_MARK: Record<Exclude<Notice['tone'], 'busy'>, Seg> = {
 
 function footer(state: State, hints: Hints, cols: number): string {
   if (state.prompt !== null) {
-    const label = state.prompt.kind === 'search' ? 'Search ' : 'Save link ';
+    const label = state.prompt.kind === 'search' ? 'Search ' : state.prompt.kind === 'note' ? 'Note ' : 'Save link ';
     const room = cols - stringWidth(label) - 4;
     // A long value scrolls left so the end being typed stays in view.
     const chars = [...state.prompt.value];
@@ -350,8 +351,14 @@ function listHints(list: ListView): Hints {
 }
 
 const READER_HINTS: Hints = {
-  hints: [['↑↓', 'scroll'], ['space', 'page'], ['a', 'archive'], ['o', 'open'], ['c', 'copy link']],
+  hints: [['↑↓', 'scroll'], ['space', 'page'], ['m', 'highlight'], ['a', 'archive'], ['o', 'open'], ['c', 'copy link']],
   pinned: [['?', 'keys'], ['esc', 'back']],
+};
+
+// While a passage is being chosen. Saving and leaving outlast everything else.
+const MARKING_HINTS: Hints = {
+  hints: [['↑↓', 'sentence'], ['←→', 'end by a word'], ['J K', 'more, fewer sentences'], ['H L', 'start by a word']],
+  pinned: [['n', 'add a note'], ['↵', 'highlight'], ['esc', 'cancel']],
 };
 
 const HIGHLIGHTS_HINTS: Hints = {
@@ -370,7 +377,10 @@ function readerFrame(state: State, reader: ReaderView, cols: number, rows: numbe
 
   let right: Seg[] = [];
   if (reader.loading) right = loadingSegs(state);
-  else if (reader.error === null && total > height) {
+  else if (reader.marking !== null) {
+    const words = wordsOf(selectedText(reader.prose, reader.marking)).length;
+    right = [seg(`Choosing a highlight · ${count(words, 'word')} `, accent)];
+  } else if (reader.error === null && total > height) {
     // How much has been seen, which is the bottom of the screen, not the top.
     const fraction = Math.min(1, (reader.scroll + height) / total);
     const left = timeLeft(reader.article.wordCount, fraction);
@@ -452,7 +462,7 @@ function highlightsFrame(state: State, view: HighlightsView, now: Date, cols: nu
     frame.push(...message(view.error, cols, err), '', ...message('Press r to try again.', cols, ink3));
   } else if (view.items.length === 0) {
     if (!view.loading) {
-      frame.push(...message('No highlights yet. Select text in an article in Quick Reads to make one.', cols, ink3));
+      frame.push(...message('No highlights yet. Press m while reading an article to make one.', cols, ink3));
     }
   } else {
     frame.push(...highlightsBody(view, now, cols).lines.slice(view.scroll, view.scroll + height));
@@ -464,8 +474,8 @@ function highlightsFrame(state: State, view: HighlightsView, now: Date, cols: nu
 
 export const HELP: { title: string; keys: Hint[] }[] = [
   { title: 'Move', keys: [['↑ ↓ j k', 'Move or scroll'], ['space b', 'Page down, page up'], ['g G', 'Top, bottom']] },
-  { title: 'Read', keys: [['↵', 'Read the article'], ['o', 'Open in your browser'], ['c', 'Copy link or highlight']] },
-  { title: 'Organize', keys: [['a', 'Archive or unarchive'], ['u', 'Undo the last archive'], ['s', 'Save a link']] },
+  { title: 'Read', keys: [['↵', 'Read the article'], ['m', 'Highlight a passage'], ['o', 'Open in your browser'], ['c', 'Copy link or highlight']] },
+  { title: 'Organize', keys: [['a', 'Archive or unarchive'], ['u', 'Undo the last change'], ['s', 'Save a link']] },
   { title: 'Find', keys: [['/', 'Search your library'], ['h', 'Highlights'], ['tab 1 2 3', 'Switch lists']] },
   { title: 'View', keys: [['v', 'Roomy or compact rows'], ['r', 'Refresh']] },
   { title: 'Leave', keys: [['esc', 'Go back'], ['q', 'Quit']] },
@@ -506,9 +516,18 @@ function helpFrame(cols: number, rows: number): string[] {
   const two = cols >= HELP_COLUMN * 2 + 10;
   const half = Math.ceil(HELP.length / 2);
   const depths = HELP.slice(0, half).map((s, i) => Math.max(s.keys.length, HELP[half + i]?.keys.length ?? 0));
-  const build = (titled: boolean): Seg[][][] => (two
-    ? [helpColumn(HELP.slice(0, half), titled, titled ? depths : []), helpColumn(HELP.slice(half), titled, titled ? depths : [])]
-    : [helpColumn(HELP, titled)]);
+  const build = (titled: boolean): Seg[][][] => {
+    if (!two) return [helpColumn(HELP, titled)];
+    if (titled) return [helpColumn(HELP.slice(0, half), true, depths), helpColumn(HELP.slice(half), true, depths)];
+    // Without titles there are no sections to keep level, so the keys are
+    // dealt evenly and the columns come out as short as they can be.
+    const keys = HELP.flatMap((section) => section.keys);
+    const middle = Math.ceil(keys.length / 2);
+    return [
+      helpColumn([{ title: '', keys: keys.slice(0, middle) }], false),
+      helpColumn([{ title: '', keys: keys.slice(middle) }], false),
+    ];
+  };
   const tallest = (cs: Seg[][][]): number => Math.max(...cs.map((c) => c.length));
   let columns = build(true);
   if (tallest(columns) + 4 > height) {
@@ -557,7 +576,7 @@ export function renderFrame(state: State, now: Date, cols: number, rows: number)
     hints = { hints: [], pinned: [['any key', 'closes this']] };
   } else if (state.screen === 'reader' && state.reader !== null) {
     frame = readerFrame(state, state.reader, cols, rows);
-    hints = READER_HINTS;
+    hints = state.reader.marking === null ? READER_HINTS : MARKING_HINTS;
   } else if (state.screen === 'highlights' && state.highlights !== null) {
     frame = highlightsFrame(state, state.highlights, now, cols, rows);
     hints = HIGHLIGHTS_HINTS;

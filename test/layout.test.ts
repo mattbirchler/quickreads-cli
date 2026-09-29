@@ -157,10 +157,11 @@ const LONG = '<h2>Heading</h2><p>First sentence of the piece. Second sentence, w
 
 test('every line of prose knows where it starts in the text', () => {
   const { lines, anchors, prose } = renderArticle(article({ content: LONG }), { width: 30 });
-  assert.deepEqual(prose, ['Heading', 'First sentence of the piece. Second sentence, with a link in it. Third one here.', '', 'Another paragraph.']);
+  assert.deepEqual(prose, ['', 'First sentence of the piece. Second sentence, with a link in it. Third one here.', '', 'Another paragraph.']);
   for (const anchor of anchors) {
     const line = lines[anchor.line]!.replace(/\[\d+\]/g, '').trim();
     const word = line.split(' ')[0]!;
+    if (prose[anchor.block] === '') continue;
     assert.ok(prose[anchor.block]!.slice(anchor.at).startsWith(word), `line ${anchor.line} "${line}" at ${anchor.at}`);
   }
   // Code has no prose to anchor in.
