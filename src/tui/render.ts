@@ -500,20 +500,31 @@ function helpFrame(cols: number, rows: number): string[] {
   const frame = [headerLine([WORDMARK, seg('   '), seg('Keys', bold)], [], cols), ''];
   const height = bodyHeight(rows);
 
-  // Two columns where there is room for them, one where there is not. The
-  // single column drops its section titles when that is what it takes to
-  // get every key on screen.
+  // Two columns where there is room for them, one where there is not.
+  // Section titles go when that is what it takes to get every key on screen,
+  // and unevenly filled sections stop being padded to match their neighbour.
   const two = cols >= HELP_COLUMN * 2 + 10;
-  const titled = two || HELP.length * 2 - 1 + HELP.reduce((n, s) => n + s.keys.length, 0) + 4 <= height;
   const half = Math.ceil(HELP.length / 2);
   const depths = HELP.slice(0, half).map((s, i) => Math.max(s.keys.length, HELP[half + i]?.keys.length ?? 0));
-  const columns = two
-    ? [helpColumn(HELP.slice(0, half), true, depths), helpColumn(HELP.slice(half), true, depths)]
-    : [helpColumn(HELP, titled)];
+  const build = (titled: boolean): Seg[][][] => (two
+    ? [helpColumn(HELP.slice(0, half), titled, titled ? depths : []), helpColumn(HELP.slice(half), titled, titled ? depths : [])]
+    : [helpColumn(HELP, titled)]);
+  const tallest = (cs: Seg[][][]): number => Math.max(...cs.map((c) => c.length));
+  let columns = build(true);
+  if (tallest(columns) + 4 > height) {
+    // Titles are worth keeping without the panel, if that is enough.
+    if (tallest(columns) > height || tallest(build(false)) + 4 <= height) columns = build(false);
+  }
   const inner = columns.length * HELP_COLUMN + (columns.length - 1) * 4 + 4;
-  if (inner + 2 > cols) {
-    // Too narrow for a panel. The keys themselves still fit.
-    for (const line of columns[0]!) frame.push(truncate(` ${line.map((s) => s.text).join('')}`.trimEnd(), cols));
+  const depth = Math.max(...columns.map((c) => c.length));
+  if (inner + 2 > cols || depth + 4 > height) {
+    // Too narrow or too short for a panel. The keys matter more than the
+    // frame around them, so the frame is what goes.
+    for (let i = 0; i < depth; i++) {
+      const segs = columns.flatMap((c, n) => [seg(n === 0 ? ' ' : '    '), ...(c[i] ?? HELP_BLANK)]);
+      // Styled text cannot be cut safely, so a row that has to be cut goes plain.
+      frame.push(widthOf(segs) > cols ? truncate(segs.map((s) => s.text).join('').trimEnd(), cols) : painted(segs));
+    }
     return frame;
   }
 
@@ -521,11 +532,10 @@ function helpFrame(cols: number, rows: number): string[] {
   const side = ink3('│');
   const row = (content: string): string => `${margin}${side}${surface(content)}${side}`;
   const blank = ' '.repeat(inner);
-  const depth = Math.max(...columns.map((c) => c.length));
 
   frame.push(`${margin}${ink3(`╭${'─'.repeat(inner)}╮`)}`, row(blank));
   for (let i = 0; i < depth; i++) {
-    const cells = columns.map((c) => painted(c[i] ?? [seg(' '.repeat(HELP_COLUMN))]));
+    const cells = columns.map((c) => painted(c[i] ?? HELP_BLANK));
     frame.push(row(`  ${cells.join('    ')}  `));
   }
   frame.push(row(blank), `${margin}${ink3(`╰${'─'.repeat(inner)}╯`)}`);

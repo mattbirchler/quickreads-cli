@@ -662,7 +662,7 @@ test('an article opens where the reading stopped', async (t) => {
   let frame = await r.press(ENTER);
   assert.ok(r.app.state.reader!.scroll > 50, 'opened partway down');
   assert.ok(!frame.some((l) => l.includes('Paragraph 0.')));
-  assert.match(frame[23]!, /Picked up at 50%\. Press g for the top\./);
+  assert.match(frame[23]!, /Picked up where you left off\. Press g for the top\./);
   assert.match(frame[0]!, /\d min left {2}[━─]{12} +\d+% $/);
 
   frame = await r.press('g');
@@ -702,6 +702,19 @@ test('help on a small terminal still lists every key', async (t) => {
   const frame = await r.press('?');
   for (const does of ['Move or scroll', 'Undo the last archive', 'Roomy or compact rows', 'Quit']) {
     assert.ok(frame.some((l) => l.includes(does)), does);
+  }
+});
+
+test('help on a short terminal gives up titles, then its frame, before it gives up a key', async (t) => {
+  const every = ['Move or scroll', 'Save a link', 'Roomy or compact rows', 'Go back', 'Quit'];
+  for (const [rows, panel, titles] of [[22, true, true], [16, true, false], [12, false, false]] as const) {
+    const r = await rig(library(), { cols: 100, rows });
+    t.after(() => r.app.stop());
+    const frame = await r.press('?');
+    assert.equal(frame.some((l) => l.includes('╭')), panel, `panel at ${rows} rows`);
+    assert.equal(frame.some((l) => /\bOrganize\b/.test(l)), titles, `titles at ${rows} rows`);
+    for (const does of every) assert.ok(frame.some((l) => l.includes(does)), `${does} at ${rows} rows`);
+    for (const line of frame) assert.ok(stringWidth(line) <= 100);
   }
 });
 

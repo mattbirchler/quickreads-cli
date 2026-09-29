@@ -273,7 +273,9 @@ export function createApp(client: Client, term: Terminal, options: AppOptions = 
       const left = progressOf(reader.article);
       if (left !== null && overflow > 0) {
         reader.scroll = Math.round(left * overflow);
-        if (reader.scroll > 0) notice(`Picked up at ${Math.round(left * 100)}%. Press g for the top.`);
+        // No number here: the header counts what has been on screen, which is
+        // a different measure from the saved position and would disagree.
+        if (reader.scroll > 0) notice('Picked up where you left off. Press g for the top.');
       }
     } else {
       reader.scroll = Math.round(progress * reader.lines.length);
